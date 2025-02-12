@@ -6,10 +6,16 @@ import os
 """TODO
 * Make PyConfig._cfg immutable outside of load function
 * Test how it works when used in imported modules
+* Test post_load_hook
 * Heirarchical config files
     * Files can include other config files
     * Settings from included files should be overwritten by main files
     * Includes can be recursive (check circular includes)
+* Add a validator class
+    * Validator will be called after post_load_hook
+    * Field type validation
+    * Mandatory field check
+    * ...
 """
 
 
@@ -21,8 +27,15 @@ class PyConfig:
     _cfg: ClassVar[dict[str, Any]]
     _post_load_hook: ClassVar[Callable[[dict], None]] = lambda x: None
 
+    def __init__(self) -> None:
+        raise NotImplementedError("PyConfig cannot be instantiated")
+    
     @classmethod
-    def load(cls, cfg_json: str | None, env: bool = False, env_prefix: str = '', **kwargs) -> None:
+    def load(cls, cfg_json: str | None = None,
+             env: bool = False,
+             env_prefix: str = '', 
+             loading_order: str = 'fek',
+             **kwargs) -> None:
         """Load configuration
         Priority order: kwargs > env > file
         Args:
@@ -33,20 +46,41 @@ class PyConfig:
               Strip env_prefix from configuration keys
               Defaults to empty strings (all env vars are stored)
               No effect if env == False
+            loading_order:
+              Define the priority order of where to pick config vals from
+              'k' -> kwargs as passed to .load()
+              'e' -> environment (as returned by os.environ())
+              'f' -> file as passed to .load()
+              Must be a string formed by the letters 'k', 'e', 'f' in any order
+              Later positon in the string indicates higher priority
+              Example: fek (default) will 
+                1) load from file
+                2) load from environment overriding previous cfg
+                3) load from kwargs overriding previous cfg
             kwargs:
               Additional key value pairs to store in configuration
         """
         cls._cfg = {}  # Clear any existing config
 
-        if cfg_json is not None:
-            cls._cfg.update(cls._load_json(cfg_json))
+        cls._load(cfg_json, env, env_prefix, **kwargs)
 
-        if env:
-            cls._cfg.update(cls._load_from_env(env_prefix))
-
-        cls._cfg.update(kwargs)
         _post_load_hook = getattr(cls, '_post_load_hook')
         _post_load_hook(cls._cfg)
+
+    @classmethod
+    def _load(cls, cfg_json: str | None = None,
+             env: bool = False,
+             env_prefix: str = '', 
+             loading_order: str = 'fek',
+             **kwargs) -> None:
+
+        for method in loading_order:
+            if method == 'f' and cfg_json is not None:
+                cls._cfg.update(cls._load_json(cfg_json))
+            if method == 'e' and env:
+                cls._cfg.update(cls._load_from_env(env_prefix))
+            if method == 'k':
+                cls._cfg.update(kwargs)
 
     @classmethod
     def _load_from_env(cls, env_prefix: str) -> dict[str, str]:
