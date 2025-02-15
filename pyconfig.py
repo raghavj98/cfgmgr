@@ -8,21 +8,10 @@ import yaml
 
 """TODO
 * Make CfgMgr._cfgs immutable outside of load function
-* Introduce a loader class
-    * Instead of taking in args for env, files and kwargs, have a loader class manage this
-    * Loader instances should provide an update method which takes in a dict and updates it with all their keys
-    * Multiple loaders can be provided, will be consumed in order - last one is highest priority
 * Heirarchical config objects
     * Children inherit all settings from parents
     * Can override inherited settings, or add new
     * Parent-child relation can be defined by the name, same as logging.getLogger()
-* 'include' directive in config files
-    * Files can include other config files
-    * Settings from included files should be overwritten by including files
-    * Includes can be recursive (check circular includes)
-    * Idea: Option to provide an include key,
-    *       if this key is present in a config source,
-            it is assumed to point to another config file to be included
 """
 
 
@@ -92,7 +81,10 @@ class CfgLoader(ABC):
 
     @property
     def cfg(self) -> dict[str, Any]:
-        return self._cfg
+        if hasattr(self, '_cfg'):
+            return self._cfg
+        else:
+            return {}
 
     @cfg.setter
     def cfg(self, _cfg: dict[str, Any]) -> None:
@@ -111,7 +103,29 @@ class EnvLoader(CfgLoader):
         }
 
 class FileLoader(CfgLoader):
+    """Loads configuration from a file
+    Only meant to be instantiated by the user, to be consumed by CfgMgr
 
+    Args:
+        file: 
+            Filepath to load the configuration from
+        loader: 
+            Method used to read the file
+            Maybe a string - 'json', 'yaml' indicating the filetype
+            Alternatively a custom callable that can read config from the filename specified
+    Raises:
+        ValueError: If loader is not a valid string
+        Propagates any errors raised by file IO or loader callable
+
+    TODO:
+        * 'include' directive in config files
+            * Files can include other config files
+            * Settings from included files should be overwritten by including files
+            * Includes can be recursive (check circular includes)
+            * Idea: Option to provide an include key,
+            *       if this key is present in a config source,
+                    it is assumed to point to another config file to be included
+    """
     _loaders: dict[str, Callable[[TextIO], dict[str, Any]]] = {
             'json': json.load,
             'yaml': yaml.safe_load
