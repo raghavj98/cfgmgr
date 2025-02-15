@@ -15,64 +15,6 @@ import yaml
 """
 
 
-CfgSchema: TypeAlias = BaseModel
-
-
-class CfgMgr[S: CfgSchema]:
-    """Static global container for key value pairs
-    Loads configuration options from a file, environment and kwargs passed to PyConfig.load()
-    """
-
-    _cfgs: dict[str, S] = {}
-
-    def __init__(self):
-        raise NotImplmentedError
-
-    @classmethod
-    def getCfg(cls, name: str = '') -> S:
-        """Get an existing configuration
-        Args:
-            name: Name passed during loadCfg 
-        Raises:
-            KeyError when config name doesn't exist
-        """
-        return cls._cfgs[name]
-
-    @classmethod
-    def loadCfg(cls, schema: type[S],  # schema is the class S itself (not an object of S)
-                name: str = '',
-                loaders: Iterable[CfgLoader] = (EnvLoader('CFG'),),
-                post_load_hook: Callable[[dict], None] = lambda x: None,
-                **kwargs) -> S:  # So, this function takes the class S and returns an instance of it
-        """Load configuration
-        Args:
-            schema:
-                Pydantic schema to be used for validation
-            name:
-                A label for the generated config
-                To be used with getCfg to fetch the config
-            loaders:
-                An interable of loader objects to load the config vars
-                Defaults to EnvLoader with prefix as "CFG"
-            kwargs:
-              Additional key value pairs to store in configuration
-        """
-        _cfg = cls._load(loaders, **kwargs)
-        post_load_hook(_cfg)
-        cfg = schema(**_cfg)
-        cls._cfgs[name] = cfg
-        return cls.getCfg(name)
-
-    @staticmethod
-    def _load(loaders: Iterable[CfgLoader],  **kwargs) -> dict[str, Any]:
-
-        _cfg: dict[str, Any] = {}
-        for loader in loaders:
-            loader.update(_cfg)
-        _cfg.update(kwargs)
-        return _cfg
-
-
 class CfgLoader(ABC):
 
     @abstractmethod
@@ -91,6 +33,7 @@ class CfgLoader(ABC):
         self._cfg = _cfg
 
     def update(self, cfg: dict[str, Any]) -> None:
+        print(f"Update called: {self.__class__}")
         cfg.update(self.cfg)
 
 
@@ -101,6 +44,64 @@ class EnvLoader(CfgLoader):
             k.removeprefix(prefix): v for k, v in os.environ.items()
             if k.startswith(prefix)
         }
+
+CfgSchema: TypeAlias = BaseModel
+
+
+class CfgMgr[S: CfgSchema]:
+    """Static global container for key value pairs
+    Loads configuration options from a file, environment and kwargs passed to PyConfig.load()
+    """
+
+    _cfgs: dict[str, S] = {}
+
+    def __init__(self):
+        raise NotImplmentedError
+
+    @classmethod
+    def get(cls, name: str = '') -> S:
+        """Get an existing configuration
+        Args:
+            name: Name passed during load 
+        Raises:
+            KeyError when config name doesn't exist
+        """
+        return cls._cfgs[name]
+
+    @classmethod
+    def load(cls, schema: type[S],  # schema is the class S itself (not an object of S)
+                name: str = '',
+                loaders: Iterable[CfgLoader] = (EnvLoader('CFG_'),),  # By default, look for env vars starting with CFG_
+                post_load_hook: Callable[[dict], None] = lambda x: None,
+                **kwargs) -> S:  # So, this function takes the class S and returns an instance of it
+        """Load configuration
+        Args:
+            schema:
+                Pydantic schema to be used for validation
+            name:
+                A label for the generated config
+                To be used with get to fetch the config
+            loaders:
+                An interable of loader objects to load the config vars
+                Defaults to EnvLoader with prefix as "CFG_"
+            kwargs:
+              Additional key value pairs to store in configuration
+        """
+        _cfg = cls._load(loaders, **kwargs)
+        post_load_hook(_cfg)
+        cfg = schema(**_cfg)
+        cls._cfgs[name] = cfg
+        return cls.get(name)
+
+    @staticmethod
+    def _load(loaders: Iterable[CfgLoader],  **kwargs) -> dict[str, Any]:
+
+        _cfg: dict[str, Any] = {}
+        for loader in loaders:
+            loader.update(_cfg)
+        _cfg.update(kwargs)
+        return _cfg
+
 
 class FileLoader(CfgLoader):
     """Loads configuration from a file
