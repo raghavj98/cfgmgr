@@ -1,0 +1,5 @@
+{
+    "foo": 42,
+    "bar": 42,
+    "include": ["config_b1.json", "config_b2.json"]
+}

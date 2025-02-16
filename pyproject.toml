@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cfg-mgr"
+version = "0.1.0"
+dependencies = [
+    "pydantic",
+    "PyYAML"
+]
+requires-python = ">=3.12"
+authors = [
+    {name = "Raghav Jindal", email = "raghavjindal1998@gmail.com"}
+]
+description = "Load and use configuration objects"
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["config", "cfg", "config file"]
+
+[project.urls]
+Homepage = "https://github.com/raghavj98/pyconfig"

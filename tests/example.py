@@ -1,5 +1,4 @@
-from pyconfig import CfgMgr, CfgSchema, EnvLoader, FileLoader
-
+from cfgmgr import CfgMgr, CfgSchema, FileLoader, EnvLoader
 
 class MyCfg(CfgSchema):
     foo: int
@@ -21,12 +20,15 @@ def print_cfg():
 
 
 def load_cfg():
-    file_loader = FileLoader('config.json', 'json')
+    file_loader = FileLoader('config.json', 'json', include_key='include')
     env_loader = EnvLoader('CFG_')  # Same as default
     CfgMgr.load(MyCfg,
-            loaders=[file_loader, env_loader],
-            baz=0,
-            post_load_hook = hook
+            loaders=[
+                file_loader,
+             #  env_loader
+            ],
+            # baz=0,
+         #   post_load_hook = hook
     )
 
 if __name__ == '__main__':
