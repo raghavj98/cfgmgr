@@ -20,15 +20,12 @@ def print_cfg():
 
 
 def load_cfg():
-    file_loader = FileLoader('config.json', 'json', include_key='include')
-    env_loader = EnvLoader('CFG_')  # Same as default
+    file_loader = FileLoader('config_files/config.json', 'json', include_key='include')
     CfgMgr.load(MyCfg,
             loaders=[
                 file_loader,
-             #  env_loader
             ],
-            # baz=0,
-         #   post_load_hook = hook
+           post_load_hook = hook
     )
 
 if __name__ == '__main__':

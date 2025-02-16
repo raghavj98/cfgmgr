@@ -89,14 +89,16 @@ class FileLoader(CfgLoader):
             self.cfg = self.loader(fp)
 
         if include_key is not None and include_key in self.cfg:
-            self.recursive_update(include_key, self.cfg.get(include_key, ()))
+            self.recursive_update(include_key, self.cfg.get(include_key, ()), os.path.dirname(file))
 
-    def recursive_update(self, include_key: str, include_files: Iterable[FileT]) -> None:
-        for file in include_files:
+    def recursive_update(self, include_key: str, include_files: Iterable[FileT], root: str) -> None:
+        for _file in include_files:
+            file = os.path.join(root, _file)
             with open(file) as fp:
                 new = self.loader(fp)
             self.cfg.update({key: val for key, val in new.items() if key not in self.cfg})
-            self.recursive_update(include_key, new.get(include_key, ()))
+            new_root = os.path.basename(file)
+            self.recursive_update(include_key, new.get(include_key, ()), root)
 
     def guess_loader(self, file: FileT) -> str:
         match = difflib.get_close_matches(file, self._loaders.keys(), n=1, cutoff=0.2)
