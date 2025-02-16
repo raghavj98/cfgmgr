@@ -1,9 +1,11 @@
-from typing import Any, ClassVar, Callable, TypeAlias, Iterable, TextIO
+from typing import Any, ClassVar, TypeAlias, Iterable, TextIO
+from collections.abc import Callable
 from pydantic import BaseModel
 import json
 import os
 from abc import ABC, abstractmethod
 import yaml
+import difflib
 
 
 """TODO
@@ -33,7 +35,6 @@ class CfgLoader(ABC):
         self._cfg = _cfg
 
     def update(self, cfg: dict[str, Any]) -> None:
-        print(f"Update called: {self.__class__}")
         cfg.update(self.cfg)
 
 
@@ -71,7 +72,7 @@ class CfgMgr[S: CfgSchema]:
     @classmethod
     def load(cls, schema: type[S],  # schema is the class S itself (not an object of S)
                 name: str = '',
-                loaders: Iterable[CfgLoader] = (EnvLoader('CFG_'),),  # By default, look for env vars starting with CFG_
+                loaders: Iterable[CfgLoader] = (EnvLoader('CFG_'),),
                 post_load_hook: Callable[[dict], None] = lambda x: None,
                 **kwargs) -> S:  # So, this function takes the class S and returns an instance of it
         """Load configuration
@@ -103,6 +104,8 @@ class CfgMgr[S: CfgSchema]:
         return _cfg
 
 
+LoaderT: TypeAlias = Callable[[TextIO], dict[str, Any]]
+FileT: TypeAlias = str  # temporary, will properly define FileT later
 class FileLoader(CfgLoader):
     """Loads configuration from a file
     Only meant to be instantiated by the user, to be consumed by CfgMgr
@@ -114,29 +117,48 @@ class FileLoader(CfgLoader):
             Method used to read the file
             Maybe a string - 'json', 'yaml' indicating the filetype
             Alternatively a custom callable that can read config from the filename specified
+        include_key:
+            A key present in the file that points to other config files to be included
+            Included files have a lower priority than the including file
+            Value pointed to by include_key must be a list of file paths
+
     Raises:
-        ValueError: If loader is not a valid string
+        KeyError: Loader specified as string not found
         Propagates any errors raised by file IO or loader callable
 
-    TODO:
-        * 'include' directive in config files
-            * Files can include other config files
-            * Settings from included files should be overwritten by including files
-            * Includes can be recursive (check circular includes)
-            * Idea: Option to provide an include key,
-            *       if this key is present in a config source,
-                    it is assumed to point to another config file to be included
     """
-    _loaders: dict[str, Callable[[TextIO], dict[str, Any]]] = {
+    _loaders: dict[str, LoaderT] = {
             'json': json.load,
             'yaml': yaml.safe_load
     }
 
-    def __init__(self, file: str, loader: str | Callable[[TextIO], dict[str, Any]] = 'json'):
-        if isinstance(loader, str) and loader not in self._loaders:
-            raise ValueError(f"Supported loaders are {self._loaders.keys()}")
+    def __init__(self, file: FileT,
+                 loader: None | str | LoaderT = None,
+                 include_key: None | str = None) -> None:
+
+        if loader is None:
+            loader = self.guess_loader(file)
+
+        if isinstance(loader, str):
+            self.loader = self._loaders[loader]
+        else:
+            self.loader = loader
+
         with open(file) as fp:
-            if isinstance(loader, str):
-                self.cfg = self._loaders[loader](fp)
-            else:
-                self.cfg = loader(fp)
+            self.cfg = self.loader(fp)
+
+        if include_key is not None and include_key in self.cfg:
+            self.recursive_update(include_key, self.cfg.get(include_key, ()))
+
+    def recursive_update(self, include_key: str, include_files: Iterable[FileT]) -> None:
+        for file in include_files:
+            with open(file) as fp:
+                new = self.loader(fp)
+            self.cfg.update({key: val for key, val in new.items() if key not in self.cfg})
+            self.recursive_update(include_key, new.get(include_key, ()))
+
+    def guess_loader(self, file: FileT) -> str:
+        match = difflib.get_close_matches(file, self._loaders.keys(), n=1, cutoff=0.2)
+        if match:
+            return match[0]
+        raise ValueError
