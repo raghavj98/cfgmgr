@@ -2,21 +2,18 @@ from cfgmgr import CfgMgr, CfgSchema, FileLoader, EnvLoader
 
 
 class MyCfg(CfgSchema):
-    foo: int
-    bar: int
-    baz: int
+    db_user: str
+    db_pwd: str
+    db_host: str
+    db_port: int
+    admins: list[str]
 
 
 def hook(some_dict):
-    if 'foo' not in some_dict:
-        raise ValueError
-    some_dict['foo'] = some_dict['foo'] * 2
-
-
-def print_cfg():
-    print(f'foo: {CfgMgr.get().foo}')
-    print(f'bar: {CfgMgr.get().bar}')
-    print(f'baz: {CfgMgr.get().baz}')
+    # Might want to check if the db_server is listening at this point
+    host = some_dict['db_host']
+    port = some_dict['db_port']
+    print(f"checking connectivity on db://{host}:{port}")
 
 
 def load_cfg():
@@ -31,4 +28,4 @@ def load_cfg():
 
 if __name__ == '__main__':
     load_cfg()
-    print_cfg()
+    print(CfgMgr.get())

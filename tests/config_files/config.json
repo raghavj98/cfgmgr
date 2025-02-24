@@ -1,5 +1,5 @@
 {
-    "foo": 42,
-    "bar": 42,
-    "include": ["config_b1.json", "config_b2.json"]
+    "admins": ["raghavj"],
+    "db_user": "raghavj",
+    "include": ["config_db.json"]
 }

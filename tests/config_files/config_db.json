@@ -1,0 +1,6 @@
+{
+    "db_user": "admin",
+    "db_pwd": "hunter2",
+    "db_host": "localhost",
+    "db_port": 9696
+}
