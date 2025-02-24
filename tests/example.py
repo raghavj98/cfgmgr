@@ -1,5 +1,6 @@
 from cfgmgr import CfgMgr, CfgSchema, FileLoader, EnvLoader
 
+
 class MyCfg(CfgSchema):
     foo: int
     bar: int
@@ -18,15 +19,15 @@ def print_cfg():
     print(f'baz: {CfgMgr.get().baz}')
 
 
-
 def load_cfg():
     file_loader = FileLoader('config_files/config.json', 'json', include_key='include')
     CfgMgr.load(MyCfg,
-            loaders=[
-                file_loader,
-            ],
-           post_load_hook = hook
-    )
+                loaders=[
+                    file_loader,
+                ],
+                post_load_hook=hook
+                )
+
 
 if __name__ == '__main__':
     load_cfg()

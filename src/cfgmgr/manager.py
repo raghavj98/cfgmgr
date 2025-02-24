@@ -14,6 +14,8 @@ from .loaders import EnvLoader, CfgLoader, CfgDictT
 
 
 CfgSchema: TypeAlias = BaseModel
+
+
 class CfgMgr[S: CfgSchema]:
     """Static global container for key value pairs
     Loads configuration options from a file, environment and kwargs passed to PyConfig.load()
@@ -36,10 +38,10 @@ class CfgMgr[S: CfgSchema]:
 
     @classmethod
     def load(cls, schema: type[S],  # schema is the class S itself (not an object of S)
-                name: str = '',
-                loaders: Iterable[CfgLoader] = (EnvLoader('CFG_'),),
-                post_load_hook: Callable[[CfgDictT], None] = lambda x: None,
-                **kwargs) -> S:  # So, this function takes the class S and returns an instance of it
+             name: str = '',
+             loaders: Iterable[CfgLoader] = (EnvLoader('CFG_'),),
+             post_load_hook: Callable[[CfgDictT], None] = lambda x: None,
+             **kwargs) -> S:  # So, this function takes the class S and returns an instance of it
         """Load configuration
         Args:
             schema:
