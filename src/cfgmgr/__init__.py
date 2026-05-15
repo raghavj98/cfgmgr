@@ -1,8 +1,22 @@
 import os
 import json
-import itertools
+import pathlib
 from abc import ABC, abstractmethod
+from collections import UserDict
 
+
+__all__ = ['Loader', 'EnvLoader', 'JSONLoader', 'Config', 'make_config']
+
+
+class _Loaders(UserDict):
+
+    def register(self, extension):
+        def wrapper(loader_class):
+            self.data[extension] = loader_class
+            return loader_class
+        return wrapper
+
+_extension_map = _Loaders()
 
 class Loader(ABC):
     '''Interface for loaders
@@ -10,6 +24,9 @@ class Loader(ABC):
     Override get to provide value when asked for a key
     get() is called by CfgMgr.get() so values from a loader can be dynamically constructed
     '''
+    # TODO: toml loader
+    # TODO: dotenv and yaml loaders as optional dependency installs
+    # TODO?: Heirarchical loaders
 
     @abstractmethod
     def __init__(self, *args, **kwargs):
@@ -31,6 +48,7 @@ class EnvLoader(Loader):
         return os.getenv(key, default)
 
 
+@_extension_map.register(".json")
 class JSONLoader(Loader):
 
     def __init__(self, file_path):
@@ -41,11 +59,10 @@ class JSONLoader(Loader):
         return self._cfg.get(key, default):
 
 
-# TODO: toml loader
-# TODO: dotenv and yaml loaders as optional dependency installs
-
 
 class Config:
+    # TODO?: Dynamic key value consturction
+    # TODO?: Type validation
 
     def __init__(loaders, **kwargs):
         self.loaders = loaders
@@ -72,32 +89,32 @@ class Config:
 
 
 def make_config(env_prefix=None, file_path=None, loaders=list(), **kwargs):
-    env_loader = EnvLoader(prefix=env_prefix)  # gets all env vars
-    file_loader = _get_file_loader(file_path)
-    if file_loader:
-        _loaders = itertools.chain([env_loader, file_loader], loaders)
-    else:
-        _loaders = itertools.chain([env_loader], loaders)
+    _loaders = [EnvLoader(prefix=env_prefix)]  # gets all env vars
+    if file_path:
+        _loaders.extend(_get_file_loader(file_path))
+    _loaders.extend(loaders)
     return Config(_loaders, **kwargs)
 
 
-def _get_file_loader(file_path):
-    _ext_map = _build_extension_map()
-    if file_path is None:
-        # TODO: Implement upwards crawl to find a config.<extension>
-        return None
-    for ext in _ext_map:
-        if file_path.endswith(ext):
-            return _ext_map[ext](file_path)
+def find_file_up(basename, extensions=list(_extension_map.keys())):
+    for ext in extensions:
+        if ext not in _extension_map:
+            raise ValueError(f"Item {ext} in {extensions} is not supported")
+    p = pathlib.Path(os.getcwd())
+    for ancestor in p.parents:
+        candidates = [f"{basename}{ext}" for ext in extensions]
+        for fname in candidates:
+            fpath = os.path.join(ancestor, fname)
+            if os.path.isfile(fpath):
+                return fpath
     return None
 
+def _get_file_loader(file_path):
+    for ext in _extension_map:
+        if file_path.endswith(ext):
+            return _extension_map[ext](file_path)
+    return None
 
-def _build_extension_map():
-    _extension_map = {
-        ".json": JSONLoader,
-    }
-    # TODO: build _extension_map based on availability of toml, yaml, dotenv parsers
-    return _extension_map
 
 #########################################################################
 
