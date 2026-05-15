@@ -1,5 +1,0 @@
-{
-    "admins": ["raghavj"],
-    "db_user": "raghavj",
-    "include": ["config_db.json"]
-}
