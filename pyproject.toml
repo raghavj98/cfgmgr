@@ -14,5 +14,14 @@ readme = "README.md"
 license = {file = "LICENSE"}
 keywords = ["config", "cfg", "config file"]
 
+[project.optional-dependencies]
+dev = [
+    "python-lsp-server",
+    "flake8",
+    "mypy",
+    "pylsp-mypy"
+]
+
+
 [project.urls]
 Homepage = "https://github.com/raghavj98/pyconfig"

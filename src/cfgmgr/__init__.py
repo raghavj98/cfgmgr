@@ -1,11 +1,14 @@
 import os
 import json
 import pathlib
+import logging
 from abc import ABC, abstractmethod
 from collections import UserDict
 
 
 __all__ = ['Loader', 'EnvLoader', 'JSONLoader', 'Config', 'make_config']
+
+_log = logging.getLogger(__name__)
 
 
 class _Loaders(UserDict):
@@ -16,13 +19,15 @@ class _Loaders(UserDict):
             return loader_class
         return wrapper
 
+
 _extension_map = _Loaders()
+
 
 class Loader(ABC):
     '''Interface for loaders
     Override __init__ to load the key value pairs
     Override get to provide value when asked for a key
-    get() is called by CfgMgr.get() so values from a loader can be dynamically constructed
+    get() is called by Config.get() so values from a loader can be dynamically constructed
     '''
     # TODO: toml loader
     # TODO: dotenv and yaml loaders as optional dependency installs
@@ -33,19 +38,21 @@ class Loader(ABC):
         pass
 
     @abstractmethod
-    def get(self, key, default=None):
+    def get(self, key: str, default=None):
         pass
 
 
 class EnvLoader(Loader):
 
-    def __init__(self, prefix=None):
+    def __init__(self, prefix=""):
+        '''Load environment variables into config
+        prefix will be stripped from env vars before loading them into the config
+        prefix="" to load all env vars
+        '''
         self.prefix = prefix
 
     def get(self, key, default=None):
-        if self.prefix:
-            return os.getenv(key.removeprefix(self.prefix), default)
-        return os.getenv(key, default)
+        return os.getenv(f"{self.prefix}{key}", default)
 
 
 @_extension_map.register(".json")
@@ -56,21 +63,20 @@ class JSONLoader(Loader):
             self._cfg = json.load(fp)
 
     def get(self, key, default=None):
-        return self._cfg.get(key, default):
-
+        return self._cfg.get(key, default)
 
 
 class Config:
     # TODO?: Dynamic key value consturction
     # TODO?: Type validation
 
-    def __init__(loaders, **kwargs):
+    def __init__(self, loaders, **kwargs):
         self.loaders = loaders
         self._overrides = dict()
         for key, value in kwargs.items():
             self._overrides[key] = value
 
-    def get(key, default=None):
+    def get(self, key, default=None):
         if key in self._overrides:
             return self._overrides[key]
         candidate = default
@@ -78,57 +84,87 @@ class Config:
             # Let each loader override the candidate
             candidate = loader.get(key, default)
         return candidate
-    
+
     def __getitem__(self, key):
         if val := self.get(key):
             return val
-        raise KeyErorr(key)
+        raise KeyError(key)
 
     def __setitem__(self, key, val):
         self._overrides[key] = val
 
 
-def make_config(env_prefix=None, file_path=None, loaders=list(), **kwargs):
-    _loaders = [EnvLoader(prefix=env_prefix)]  # gets all env vars
+# Primary public interface
+
+_config = None
+
+
+def make_config(env_prefix=None, file_path=None, find_file=False, loaders=list(), **kwargs):
+    global _config
+    _loaders = []
+    if env_prefix or env_prefix == "":
+        _loaders.append(EnvLoader(prefix=env_prefix))
     if file_path:
-        _loaders.extend(_get_file_loader(file_path))
+        if find_file:
+            file_path = find_file_up(file_path)
+        _loaders.append(get_file_loader(file_path))
     _loaders.extend(loaders)
-    return Config(_loaders, **kwargs)
+    _config = Config(_loaders, **kwargs)
 
 
-def find_file_up(basename, extensions=list(_extension_map.keys())):
-    for ext in extensions:
-        if ext not in _extension_map:
-            raise ValueError(f"Item {ext} in {extensions} is not supported")
+def get(key, default=None):
+    # Intentionally not exposed in __all__ to prevent namespace collisions
+    if not _config:
+        # Log, and let _config.get raise
+        _log.error("get called on uninitialized config, did you call make_config?")
+    return _config.get(key, default)
+
+
+def set(key, value):
+    # Intentionally not exposed in __all__ to prevent namespace collisions
+    if not _config:
+        # Log, and let _config.set raise
+        _log.error("set called on uninitialized config, did you call make_config?")
+    _config.set(key, value)
+
+
+# Utility
+
+def find_file_up(basename):
+    # Try to parse extension
+    for ext in _extension_map:
+        if basename.endswith(ext):
+            break
+    else:
+        _unsupported_ext(basename)
+
     p = pathlib.Path(os.getcwd())
     for ancestor in p.parents:
-        candidates = [f"{basename}{ext}" for ext in extensions]
-        for fname in candidates:
-            fpath = os.path.join(ancestor, fname)
-            if os.path.isfile(fpath):
-                return fpath
+        fpath = os.path.join(ancestor, basename)
+        if os.path.isfile(fpath):
+            return fpath
     return None
 
-def _get_file_loader(file_path):
+
+def get_file_loader(file_path):
     for ext in _extension_map:
         if file_path.endswith(ext):
             return _extension_map[ext](file_path)
-    return None
+    _unsupported_ext(file_path)
 
 
-#########################################################################
+def _unsupported_ext(fname):
+    _log.error(f"Can't detect a supported extension for {fname}")
+    _log.debug(f"Supported extensions: {list(_extension_map.keys())}")
+    raise ValueError(fname)
 
-# Intended usage
+
+'''Intended usage
 
 import cfgmgr
 
 # Sensible default usage
-some_val = cfgmgr.Config.get('key')
-some_val = cfgmgr.Config['key']  # Should have __getitem__ and __setitem__
-
-# Dynamically override values
-cfgmgr.Config.set('key', 'new_val')
-new_val = cfgmgr.Config.get('key')
-
-# Allow config variants?
-test_val = cfgmgr.OtherConfig.get('key')
+cfgmgr.make_config(env_prefix="CFG_", file_path="config.json", find_file=True)
+some_val = cfgmgr.get('key')
+cfgmgr.set('key', 'new_val')
+'''
