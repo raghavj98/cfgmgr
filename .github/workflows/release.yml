@@ -1,0 +1,35 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - 'rel-v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    # Must match the environment you configured on the GitHub repo and,
+    # if set, the environment name on the PyPI trusted publisher.
+    environment: pypi
+
+    permissions:
+      # Required for PyPI trusted publishing (OIDC). No API token needed.
+      id-token: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Build sdist and wheel into dist/
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Publish dist/ to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
