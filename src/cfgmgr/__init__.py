@@ -89,6 +89,9 @@ class Config:
             candidate = loader.get(key, candidate)
         return candidate
 
+    def set(self, key, value):
+        self._overrides[key] = value
+
     def __getitem__(self, key):
         val = self.get(key, _MISSING)
         if val is _MISSING:
@@ -112,8 +115,7 @@ def make_config(env_prefix=None, file_path=None, find_file=False, **kwargs):
     global _config
     _loaders = []
     if file_path:
-        if find_file:
-            target = find_file_up(file_path)
+        target = find_file_up(file_path) if find_file else file_path
         if not target:
             raise FileNotFoundError(file_path)
         _loaders.append(get_file_loader(target))
@@ -135,7 +137,7 @@ def set(key, value):
     if not _config:
         # Log, and let _config.set raise
         _log.error("set called on uninitialized config, did you call make_config?")
-    _config[key] = value
+    _config.set(key, value)
 
 
 # Utility
