@@ -132,6 +132,16 @@ class DotEnvLoader(FileLoader):
         return dotenv.dotenv_values(dotenv_path=file_path)
 
 
+@fileloaders.register(".yaml", enabled=yaml is not None)
+@fileloaders.register(".yml", enabled=yaml is not None)
+class YAMLLoader(FileLoader):
+
+    @staticmethod
+    def _parse(file_path):
+        with open(file_path, 'r') as fp:
+            return yaml.safe_load(fp)
+
+
 class Config:
     # TODO?: Type validation
     # TODO?: Dynamic key value consturction

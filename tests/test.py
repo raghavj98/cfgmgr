@@ -312,7 +312,7 @@ class MakeConfigTest(unittest.TestCase):
 
     def test_unsupported_extension(self):
         with self.assertRaises(ValueError):
-            cfgmgr.make_config(file_path="config.yaml")
+            cfgmgr.make_config(file_path="config.xyz")
 
     def test_find_file_not_found(self):
         with self.assertRaises(FileNotFoundError):
@@ -388,7 +388,7 @@ class FindFileUpTest(unittest.TestCase):
 
     def test_unsupported_extension(self):
         with self.assertRaises(ValueError):
-            cfgmgr.find_file_up("config.yaml")
+            cfgmgr.find_file_up("config.xyz")
 
 
 class GetFileLoaderTest(unittest.TestCase):
@@ -411,7 +411,7 @@ class GetFileLoaderTest(unittest.TestCase):
 
     def test_unsupported_extension(self):
         with self.assertRaises(ValueError):
-            cfgmgr.get_file_loader("config.yaml")
+            cfgmgr.get_file_loader("config.xyz")
 
 
 # --------------------------------------------------------------------------
@@ -606,11 +606,11 @@ class ConditionalRegistrationTest(unittest.TestCase):
             cfgmgr.dotenv is not None,
         )
 
-    def test_yaml_not_registered(self):
-        # No YAMLLoader class exists yet, so .yaml/.yml stay unsupported
-        # regardless of whether PyYAML is installed.
-        self.assertNotIn(".yaml", cfgmgr.fileloaders)
-        self.assertNotIn(".yml", cfgmgr.fileloaders)
+    def test_yaml_registered_iff_pyyaml_available(self):
+        # YAMLLoader registers both extensions, gated on PyYAML.
+        registered = (".yaml" in cfgmgr.fileloaders
+                      and ".yml" in cfgmgr.fileloaders)
+        self.assertEqual(registered, cfgmgr.yaml is not None)
 
     def test_json_always_registered(self):
         self.assertIn(".json", cfgmgr.fileloaders)

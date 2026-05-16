@@ -15,7 +15,12 @@ license = {file = "LICENSE"}
 keywords = ["config", "cfg", "config file"]
 
 [project.optional-dependencies]
+yaml = ["PyYAML>=6.0"]
+dotenv = ["python-dotenv>=1.0.0"]
+all = ["cfg-mgr[yaml,dotenv]"]
+
 dev = [
+    "cfg-mgr[all]",
     "python-lsp-server",
     "flake8",
     "build"
