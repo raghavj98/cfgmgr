@@ -1,3 +1,12 @@
+'''Usage
+
+import cfgmgr
+
+cfgmgr.make_config(env_prefix="CFG_", file_path="config.json", find_file=True)
+some_val = cfgmgr.get('key')
+cfgmgr.set('key', 'new_val')
+'''
+
 import os
 import json
 import pathlib
@@ -7,11 +16,12 @@ from collections import UserDict
 
 
 __all__ = ['Loader', 'EnvLoader', 'JSONLoader', 'Config', 'make_config']
+_MISSING = object()
 
 _log = logging.getLogger(__name__)
 
 
-class _Loaders(UserDict):
+class _FileLoaders(UserDict):
 
     def register(self, extension):
         def wrapper(loader_class):
@@ -20,7 +30,7 @@ class _Loaders(UserDict):
         return wrapper
 
 
-_extension_map = _Loaders()
+fileloaders = _FileLoaders()
 
 
 class Loader(ABC):
@@ -32,10 +42,6 @@ class Loader(ABC):
     # TODO: toml loader
     # TODO: dotenv and yaml loaders as optional dependency installs
     # TODO?: Heirarchical loaders
-
-    @abstractmethod
-    def __init__(self, *args, **kwargs):
-        pass
 
     @abstractmethod
     def get(self, key: str, default=None):
@@ -55,7 +61,7 @@ class EnvLoader(Loader):
         return os.getenv(f"{self.prefix}{key}", default)
 
 
-@_extension_map.register(".json")
+@fileloaders.register(".json")
 class JSONLoader(Loader):
 
     def __init__(self, file_path):
@@ -72,9 +78,7 @@ class Config:
 
     def __init__(self, loaders, **kwargs):
         self.loaders = loaders
-        self._overrides = dict()
-        for key, value in kwargs.items():
-            self._overrides[key] = value
+        self._overrides = dict(kwargs)
 
     def get(self, key, default=None):
         if key in self._overrides:
@@ -82,16 +86,21 @@ class Config:
         candidate = default
         for loader in self.loaders:
             # Let each loader override the candidate
-            candidate = loader.get(key, default)
+            candidate = loader.get(key, candidate)
         return candidate
 
     def __getitem__(self, key):
-        if val := self.get(key):
-            return val
-        raise KeyError(key)
+        val = self.get(key, _MISSING)
+        if val is _MISSING:
+            raise KeyError(key)
+        return val
 
     def __setitem__(self, key, val):
         self._overrides[key] = val
+
+    def __contains__(self, key):
+        val = self.get(key, _MISSING)
+        return val is not _MISSING
 
 
 # Primary public interface
@@ -99,16 +108,17 @@ class Config:
 _config = None
 
 
-def make_config(env_prefix=None, file_path=None, find_file=False, loaders=list(), **kwargs):
+def make_config(env_prefix=None, file_path=None, find_file=False, **kwargs):
     global _config
     _loaders = []
-    if env_prefix or env_prefix == "":
-        _loaders.append(EnvLoader(prefix=env_prefix))
     if file_path:
         if find_file:
-            file_path = find_file_up(file_path)
-        _loaders.append(get_file_loader(file_path))
-    _loaders.extend(loaders)
+            target = find_file_up(file_path)
+        if not target:
+            raise FileNotFoundError(file_path)
+        _loaders.append(get_file_loader(target))
+    if env_prefix is not None:
+        _loaders.append(EnvLoader(prefix=env_prefix))
     _config = Config(_loaders, **kwargs)
 
 
@@ -125,21 +135,21 @@ def set(key, value):
     if not _config:
         # Log, and let _config.set raise
         _log.error("set called on uninitialized config, did you call make_config?")
-    _config.set(key, value)
+    _config[key] = value
 
 
 # Utility
 
 def find_file_up(basename):
     # Try to parse extension
-    for ext in _extension_map:
+    for ext in fileloaders:
         if basename.endswith(ext):
             break
     else:
         _unsupported_ext(basename)
 
     p = pathlib.Path(os.getcwd())
-    for ancestor in p.parents:
+    for ancestor in [p, *p.parents]:
         fpath = os.path.join(ancestor, basename)
         if os.path.isfile(fpath):
             return fpath
@@ -147,24 +157,13 @@ def find_file_up(basename):
 
 
 def get_file_loader(file_path):
-    for ext in _extension_map:
+    for ext in fileloaders:
         if file_path.endswith(ext):
-            return _extension_map[ext](file_path)
+            return fileloaders[ext](file_path)
     _unsupported_ext(file_path)
 
 
 def _unsupported_ext(fname):
     _log.error(f"Can't detect a supported extension for {fname}")
-    _log.debug(f"Supported extensions: {list(_extension_map.keys())}")
+    _log.debug(f"Supported extensions: {list(fileloaders.keys())}")
     raise ValueError(fname)
-
-
-'''Intended usage
-
-import cfgmgr
-
-# Sensible default usage
-cfgmgr.make_config(env_prefix="CFG_", file_path="config.json", find_file=True)
-some_val = cfgmgr.get('key')
-cfgmgr.set('key', 'new_val')
-'''

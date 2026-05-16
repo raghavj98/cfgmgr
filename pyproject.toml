@@ -9,7 +9,7 @@ requires-python = ">=3.9"
 authors = [
     {name = "Raghav Jindal", email = "raghavjindal1998@gmail.com"}
 ]
-description = "Load and use configuration objects"
+description = "Simple out-of-box configs"
 readme = "README.md"
 license = {file = "LICENSE"}
 keywords = ["config", "cfg", "config file"]
@@ -18,10 +18,7 @@ keywords = ["config", "cfg", "config file"]
 dev = [
     "python-lsp-server",
     "flake8",
-    "mypy",
-    "pylsp-mypy"
 ]
 
-
 [project.urls]
-Homepage = "https://github.com/raghavj98/pyconfig"
+Homepage = "https://github.com/raghavj98/cfgmgr"
