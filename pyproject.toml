@@ -4,19 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cfg-mgr"
-version = "0.1.0"
-dependencies = [
-    "pydantic",
-    "PyYAML"
-]
-requires-python = ">=3.12"
+version = "0.2.0"
+requires-python = ">=3.9"
 authors = [
     {name = "Raghav Jindal", email = "raghavjindal1998@gmail.com"}
 ]
-description = "Load and use configuration objects"
+description = "Simple out-of-box configs"
 readme = "README.md"
 license = {file = "LICENSE"}
 keywords = ["config", "cfg", "config file"]
 
+[project.optional-dependencies]
+dev = [
+    "python-lsp-server",
+    "flake8",
+    "build"
+]
+
 [project.urls]
-Homepage = "https://github.com/raghavj98/pyconfig"
+Homepage = "https://github.com/raghavj98/cfgmgr"
