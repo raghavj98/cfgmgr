@@ -8,10 +8,7 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-
-    # Must match the environment you configured on the GitHub repo and,
-    # if set, the environment name on the PyPI trusted publisher.
-    environment: pypi
+    environment: pypi-deploy
 
     permissions:
       # Required for PyPI trusted publishing (OIDC). No API token needed.
