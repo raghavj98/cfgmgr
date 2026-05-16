@@ -18,6 +18,7 @@ keywords = ["config", "cfg", "config file"]
 dev = [
     "python-lsp-server",
     "flake8",
+    "build"
 ]
 
 [project.urls]
