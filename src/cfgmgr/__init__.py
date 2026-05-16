@@ -11,21 +11,39 @@ import os
 import json
 import pathlib
 import logging
-from abc import ABC, abstractmethod
 from collections import UserDict
+from collections.abc import Mapping
+from abc import abstractmethod
+
+_log = logging.getLogger(__name__)
+
+# Conditional imports
+try:
+    import tomllib
+except ModuleNotFoundError:
+    tomllib = None
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    yaml = None
+
+try:
+    import dotenv
+except ModuleNotFoundError:
+    dotenv = None
 
 
 __all__ = ['Loader', 'EnvLoader', 'JSONLoader', 'Config', 'make_config']
 _MISSING = object()
 
-_log = logging.getLogger(__name__)
-
 
 class _FileLoaders(UserDict):
 
-    def register(self, extension):
+    def register(self, extension, enabled=True):
         def wrapper(loader_class):
-            self.data[extension] = loader_class
+            if enabled:
+                self.data[extension] = loader_class
             return loader_class
         return wrapper
 
@@ -33,19 +51,14 @@ class _FileLoaders(UserDict):
 fileloaders = _FileLoaders()
 
 
-class Loader(ABC):
+class Loader(Mapping):
     '''Interface for loaders
+    Just an alias for Mapping currently, may add stricter constraints in the future
     Override __init__ to load the key value pairs
     Override get to provide value when asked for a key
     get() is called by Config.get() so values from a loader can be dynamically constructed
     '''
-    # TODO: toml loader
-    # TODO: dotenv and yaml loaders as optional dependency installs
     # TODO?: Heirarchical loaders
-
-    @abstractmethod
-    def get(self, key: str, default=None):
-        pass
 
 
 class EnvLoader(Loader):
@@ -57,26 +70,76 @@ class EnvLoader(Loader):
         '''
         self.prefix = prefix
 
-    def get(self, key, default=None):
-        return os.getenv(f"{self.prefix}{key}", default)
+    def __getitem__(self, key):
+        env_key = f"{self.prefix}{key}"
+        return os.environ[env_key]
+
+    def __iter__(self):
+        return filter(lambda key: key.beginswith(self.prefix), os.environ)
+
+    def __len__(self):
+        return len(key for key in os.environ if key.beginswith(self.prefix))
+
+
+class FileLoader(Loader):
+
+    @abstractmethod
+    def _parse(self, file_path):
+        pass
+
+    def __init__(self, file_path):
+        self._cfg = self._parse(file_path)
+
+    def __getitem__(self, key):
+        return self._cfg[key]
+
+    def __iter__(self):
+        return iter(self._cfg)
+
+    def __len__(self):
+        return len(self._cfg)
+
+    # def get(self, key, default=None):
+    #     return self._cfg.get(key, default)
 
 
 @fileloaders.register(".json")
-class JSONLoader(Loader):
+class JSONLoader(FileLoader):
 
-    def __init__(self, file_path):
+    @staticmethod
+    def _parse(file_path):
         with open(file_path, 'r') as fp:
-            self._cfg = json.load(fp)
+            return json.load(fp)
 
-    def get(self, key, default=None):
-        return self._cfg.get(key, default)
+
+@fileloaders.register(".toml", enabled=tomllib is not None)
+class TOMLLoader(FileLoader):
+
+    @staticmethod
+    def _parse(file_path):
+        with open(file_path, 'rb') as fp:
+            return tomllib.load(fp)
+
+
+@fileloaders.register(".env", enabled=dotenv is not None)
+class DotEnvLoader(FileLoader):
+
+    @staticmethod
+    def _parse(file_path):
+        return dotenv.dotenv_values(dotenv_path=file_path)
 
 
 class Config:
-    # TODO?: Dynamic key value consturction
     # TODO?: Type validation
+    # TODO?: Dynamic key value consturction
 
     def __init__(self, loaders, **kwargs):
+        ''' loaders is an iterable of Loader
+        Loader implements the Mapping interface
+        Priority order is inverted - a later Loader overrides earlier ones.
+        Ex. If you pass in [FileLoader, EnvLoader], values from EnvLoader will override those from FileLoader
+        **kwargs has highest priority - overrides everything
+        '''
         self.loaders = loaders
         self._overrides = dict(kwargs)
 

@@ -22,8 +22,14 @@ class DictLoader(cfgmgr.Loader):
     def __init__(self, values):
         self._values = values
 
-    def get(self, key, default=None):
-        return self._values.get(key, default)
+    def __getitem__(self, key):
+        return self._values[key]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
 
 
 # --------------------------------------------------------------------------
@@ -418,8 +424,16 @@ class StubLoader(cfgmgr.Loader):
     def __init__(self, file_path):
         self.file_path = file_path
 
-    def get(self, key, default=None):
-        return "stub_value" if key == "STUB" else default
+    def __getitem__(self, key):
+        if key == "STUB":
+            return "stub_value"
+        raise KeyError(key)
+
+    def __iter__(self):
+        return iter(["stub_value"])
+
+    def __len__(self):
+        return 1
 
 
 class RegistryTest(unittest.TestCase):
