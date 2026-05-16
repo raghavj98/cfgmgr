@@ -469,5 +469,264 @@ class LoaderABCTest(unittest.TestCase):
             Incomplete()
 
 
+# --------------------------------------------------------------------------
+# Loader Mapping interface
+#
+# The refactor makes every Loader a collections.abc.Mapping. Subclasses only
+# implement __getitem__/__iter__/__len__; get/keys/items/values/__contains__
+# come from Mapping. These tests pin that contract.
+# --------------------------------------------------------------------------
+
+class FileLoaderMappingTest(unittest.TestCase):
+    '''JSONLoader exercised as a full Mapping (JSON is always available).'''
+
+    def setUp(self):
+        self.start_dir = os.getcwd()
+        if os.path.exists("tmp_test"):
+            shutil.rmtree("tmp_test")
+        os.makedirs("tmp_test")
+        with open("tmp_test/good.json", 'w') as fp:
+            json.dump({"FOO": "bar", "NUM": 1}, fp)
+        self.loader = cfgmgr.JSONLoader("tmp_test/good.json")
+
+    def tearDown(self):
+        os.chdir(self.start_dir)
+        shutil.rmtree("tmp_test")
+
+    def test_is_mapping(self):
+        from collections.abc import Mapping
+        self.assertIsInstance(self.loader, Mapping)
+
+    def test_iter_yields_keys(self):
+        self.assertEqual(set(self.loader), {"FOO", "NUM"})
+
+    def test_len(self):
+        self.assertEqual(len(self.loader), 2)
+
+    def test_contains(self):
+        self.assertIn("FOO", self.loader)
+        self.assertNotIn("MISSING", self.loader)
+
+    def test_keys_items_values(self):
+        self.assertEqual(set(self.loader.keys()), {"FOO", "NUM"})
+        self.assertEqual(set(self.loader.values()), {"bar", 1})
+        self.assertEqual(dict(self.loader.items()), {"FOO": "bar", "NUM": 1})
+
+    def test_getitem(self):
+        self.assertEqual(self.loader["FOO"], "bar")
+
+    def test_getitem_missing_raises_keyerror(self):
+        with self.assertRaises(KeyError):
+            self.loader["MISSING"]
+
+    def test_dict_round_trip(self):
+        self.assertEqual(dict(self.loader), {"FOO": "bar", "NUM": 1})
+
+
+class EnvLoaderMappingTest(unittest.TestCase):
+    '''EnvLoader exercised as a full Mapping.
+
+    NOTE: these currently fail -- EnvLoader.__iter__/__len__ call the
+    non-existent str method `beginswith` (should be `startswith`),
+    __len__ calls len() on a generator, and __iter__ does not strip the
+    prefix. The tests below encode the intended behaviour.
+    '''
+
+    def setUp(self):
+        os.environ["CFGMGRITER_A"] = "1"
+        os.environ["CFGMGRITER_B"] = "2"
+        self.addCleanup(os.environ.pop, "CFGMGRITER_A", None)
+        self.addCleanup(os.environ.pop, "CFGMGRITER_B", None)
+        self.loader = cfgmgr.EnvLoader(prefix="CFGMGRITER_")
+
+    def test_iter_yields_prefix_stripped_keys(self):
+        # Only our keys are checked; the process may hold unrelated env vars.
+        keys = set(self.loader)
+        self.assertIn("A", keys)
+        self.assertIn("B", keys)
+        self.assertNotIn("CFGMGRITER_A", keys)  # prefix must be stripped
+
+    def test_len_counts_prefixed_vars(self):
+        # Exactly the two we set carry this prefix.
+        self.assertEqual(len(self.loader), 2)
+
+    def test_contains_uses_stripped_key(self):
+        self.assertIn("A", self.loader)
+        self.assertNotIn("CFGMGRITER_A", self.loader)
+        self.assertNotIn("MISSING", self.loader)
+
+    def test_dict_round_trip(self):
+        # Iterating then indexing each key must resolve back to the value.
+        self.assertEqual(dict(self.loader), {"A": "1", "B": "2"})
+
+
+# --------------------------------------------------------------------------
+# FileLoader abstract base
+# --------------------------------------------------------------------------
+
+class FileLoaderABCTest(unittest.TestCase):
+
+    def test_cannot_instantiate_fileloader(self):
+        # _parse is abstract.
+        with self.assertRaises(TypeError):
+            cfgmgr.FileLoader("anything")
+
+    def test_subclass_without_parse_cannot_instantiate(self):
+        class NoParse(cfgmgr.FileLoader):
+            pass
+        with self.assertRaises(TypeError):
+            NoParse("anything")
+
+    def test_subclass_with_parse_instantiates(self):
+        class InMemory(cfgmgr.FileLoader):
+            @staticmethod
+            def _parse(file_path):
+                return {"K": "V"}
+        loader = InMemory("ignored")
+        self.assertEqual(loader.get("K"), "V")
+        self.assertEqual(dict(loader), {"K": "V"})
+
+
+# --------------------------------------------------------------------------
+# Conditional loader registration
+# --------------------------------------------------------------------------
+
+class ConditionalRegistrationTest(unittest.TestCase):
+    '''Optional loaders register only when their dependency is importable.'''
+
+    def test_toml_registered_iff_tomllib_available(self):
+        self.assertEqual(
+            ".toml" in cfgmgr.fileloaders,
+            cfgmgr.tomllib is not None,
+        )
+
+    def test_dotenv_registered_iff_dotenv_available(self):
+        self.assertEqual(
+            ".env" in cfgmgr.fileloaders,
+            cfgmgr.dotenv is not None,
+        )
+
+    def test_yaml_not_registered(self):
+        # No YAMLLoader class exists yet, so .yaml/.yml stay unsupported
+        # regardless of whether PyYAML is installed.
+        self.assertNotIn(".yaml", cfgmgr.fileloaders)
+        self.assertNotIn(".yml", cfgmgr.fileloaders)
+
+    def test_json_always_registered(self):
+        self.assertIn(".json", cfgmgr.fileloaders)
+
+    def test_register_disabled_skips_registration(self):
+        sentinel = type("Sentinel", (), {})
+        returned = cfgmgr.fileloaders.register(".nope", enabled=False)(sentinel)
+        self.addCleanup(cfgmgr.fileloaders.data.pop, ".nope", None)
+        self.assertIs(returned, sentinel)          # class still returned
+        self.assertNotIn(".nope", cfgmgr.fileloaders)  # but not registered
+
+
+# --------------------------------------------------------------------------
+# TOMLLoader  (Python 3.11+ / tomllib)
+# --------------------------------------------------------------------------
+
+@unittest.skipUnless(cfgmgr.tomllib is not None, "tomllib not available")
+class TOMLLoaderTest(unittest.TestCase):
+
+    def setUp(self):
+        self.start_dir = os.getcwd()
+        if os.path.exists("tmp_test"):
+            shutil.rmtree("tmp_test")
+        os.makedirs("tmp_test")
+        with open("tmp_test/good.toml", 'w') as fp:
+            fp.write('FOO = "bar"\nNUM = 1\n\n[section]\nKEY = "value"\n')
+        with open("tmp_test/bad.toml", 'w') as fp:
+            fp.write("key =\n")  # value missing -> decode error
+
+    def tearDown(self):
+        os.chdir(self.start_dir)
+        shutil.rmtree("tmp_test")
+
+    def test_get_existing_key(self):
+        loader = cfgmgr.TOMLLoader("tmp_test/good.toml")
+        self.assertEqual(loader.get("FOO"), "bar")
+        self.assertEqual(loader.get("NUM"), 1)
+
+    def test_get_table_as_nested_mapping(self):
+        loader = cfgmgr.TOMLLoader("tmp_test/good.toml")
+        self.assertEqual(loader.get("section"), {"KEY": "value"})
+
+    def test_get_missing_key_default(self):
+        loader = cfgmgr.TOMLLoader("tmp_test/good.toml")
+        self.assertIsNone(loader.get("MISSING"))
+        self.assertEqual(loader.get("MISSING", "fallback"), "fallback")
+
+    def test_mapping_interface(self):
+        loader = cfgmgr.TOMLLoader("tmp_test/good.toml")
+        self.assertEqual(set(loader), {"FOO", "NUM", "section"})
+        self.assertEqual(len(loader), 3)
+
+    def test_file_not_found(self):
+        with self.assertRaises(FileNotFoundError):
+            cfgmgr.TOMLLoader("tmp_test/does_not_exist.toml")
+
+    def test_invalid_toml(self):
+        with self.assertRaises(cfgmgr.tomllib.TOMLDecodeError):
+            cfgmgr.TOMLLoader("tmp_test/bad.toml")
+
+    def test_get_file_loader_returns_toml_loader(self):
+        loader = cfgmgr.get_file_loader("tmp_test/good.toml")
+        self.assertIsInstance(loader, cfgmgr.TOMLLoader)
+
+    def test_make_config_with_toml(self):
+        os.chdir("tmp_test")
+        cfgmgr.make_config(file_path="good.toml")
+        self.assertEqual(cfgmgr.get("FOO"), "bar")
+
+
+# --------------------------------------------------------------------------
+# DotEnvLoader  (requires python-dotenv)
+# --------------------------------------------------------------------------
+
+@unittest.skipUnless(cfgmgr.dotenv is not None, "python-dotenv not available")
+class DotEnvLoaderTest(unittest.TestCase):
+
+    def setUp(self):
+        self.start_dir = os.getcwd()
+        if os.path.exists("tmp_test"):
+            shutil.rmtree("tmp_test")
+        os.makedirs("tmp_test")
+        with open("tmp_test/config.env", 'w') as fp:
+            fp.write("FOO=bar\nNUM=1\n")
+
+    def tearDown(self):
+        os.chdir(self.start_dir)
+        shutil.rmtree("tmp_test")
+
+    def test_get_existing_key(self):
+        loader = cfgmgr.DotEnvLoader("tmp_test/config.env")
+        self.assertEqual(loader.get("FOO"), "bar")
+
+    def test_values_are_strings(self):
+        # dotenv does not coerce types -- everything is a string.
+        loader = cfgmgr.DotEnvLoader("tmp_test/config.env")
+        self.assertEqual(loader.get("NUM"), "1")
+
+    def test_get_missing_key_default(self):
+        loader = cfgmgr.DotEnvLoader("tmp_test/config.env")
+        self.assertEqual(loader.get("MISSING", "fallback"), "fallback")
+
+    def test_mapping_interface(self):
+        loader = cfgmgr.DotEnvLoader("tmp_test/config.env")
+        self.assertEqual(set(loader), {"FOO", "NUM"})
+        self.assertEqual(len(loader), 2)
+
+    def test_get_file_loader_returns_dotenv_loader(self):
+        loader = cfgmgr.get_file_loader("tmp_test/config.env")
+        self.assertIsInstance(loader, cfgmgr.DotEnvLoader)
+
+    def test_make_config_with_dotenv(self):
+        os.chdir("tmp_test")
+        cfgmgr.make_config(file_path="config.env")
+        self.assertEqual(cfgmgr.get("FOO"), "bar")
+
+
 if __name__ == '__main__':
     unittest.main()

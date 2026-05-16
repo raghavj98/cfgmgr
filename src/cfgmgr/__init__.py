@@ -34,7 +34,8 @@ except ModuleNotFoundError:
     dotenv = None
 
 
-__all__ = ['Loader', 'EnvLoader', 'JSONLoader', 'Config', 'make_config']
+__all__ = ['Loader', 'FileLoader', 'EnvLoader', 'JSONLoader', 'TOMLLoader', 'YAMLLoader', 'DotEnvLoader',
+           'Config', 'make_config']
 _MISSING = object()
 
 
@@ -75,10 +76,12 @@ class EnvLoader(Loader):
         return os.environ[env_key]
 
     def __iter__(self):
-        return filter(lambda key: key.beginswith(self.prefix), os.environ)
+        for key in os.environ:
+            if key.startswith(self.prefix):
+                yield key.removeprefix(self.prefix)
 
     def __len__(self):
-        return len(key for key in os.environ if key.beginswith(self.prefix))
+        return sum(1 for key in os.environ if key.startswith(self.prefix))
 
 
 class FileLoader(Loader):
