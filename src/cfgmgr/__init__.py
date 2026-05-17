@@ -11,8 +11,9 @@ import os
 import json
 import pathlib
 import logging
+import builtins
 from collections import UserDict
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from abc import abstractmethod
 
 _log = logging.getLogger(__name__)
@@ -142,21 +143,24 @@ class YAMLLoader(FileLoader):
             return yaml.safe_load(fp)
 
 
-class Config:
+class Config(MutableMapping):
     # TODO?: Type validation
     # TODO?: Dynamic key value consturction
-
     def __init__(self, loaders, **kwargs):
         ''' loaders is an iterable of Loader
         Loader implements the Mapping interface
+        Config implements the MutableMapping interface
         Priority order is inverted - a later Loader overrides earlier ones.
         Ex. If you pass in [FileLoader, EnvLoader], values from EnvLoader will override those from FileLoader
         **kwargs has highest priority - overrides everything
         '''
-        self.loaders = loaders
+        self.loaders = list(loaders)
+        self._deleted = builtins.set()
         self._overrides = dict(kwargs)
 
     def get(self, key, default=None):
+        if key in self._deleted:
+            return default
         if key in self._overrides:
             return self._overrides[key]
         candidate = default
@@ -165,9 +169,6 @@ class Config:
             candidate = loader.get(key, candidate)
         return candidate
 
-    def set(self, key, value):
-        self._overrides[key] = value
-
     def __getitem__(self, key):
         val = self.get(key, _MISSING)
         if val is _MISSING:
@@ -175,11 +176,30 @@ class Config:
         return val
 
     def __setitem__(self, key, val):
+        self._deleted.discard(key)
         self._overrides[key] = val
 
-    def __contains__(self, key):
-        val = self.get(key, _MISSING)
-        return val is not _MISSING
+    def __delitem__(self, key):
+        if self.get(key, _MISSING) is _MISSING:
+            raise KeyError(key)
+        self._overrides.pop(key)
+        self._deleted.add(key)
+
+    def __iter__(self):
+        _yielded = builtins.set()
+        for key in self._overrides:
+            if key not in self._deleted:
+                _yielded.add(key)
+                yield key
+        for loader in reversed(self.loaders):
+            for key in loader:
+                if key not in _yielded and key not in self._deleted:
+                    _yielded.add(key)
+                    yield key
+
+    def __len__(self):
+        # Warning, expensive!
+        return sum(1 for _ in self)
 
 
 # Primary public interface
@@ -213,7 +233,7 @@ def set(key, value):
     if not _config:
         # Log, and let _config.set raise
         _log.error("set called on uninitialized config, did you call make_config?")
-    _config.set(key, value)
+    _config.__setitem__(key, value)
 
 
 # Utility
