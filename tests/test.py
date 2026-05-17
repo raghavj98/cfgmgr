@@ -4,6 +4,7 @@ import os
 import json
 import shutil
 import logging
+from types import MappingProxyType
 
 
 def setUpModule():
@@ -726,6 +727,451 @@ class DotEnvLoaderTest(unittest.TestCase):
         os.chdir("tmp_test")
         cfgmgr.make_config(file_path="config.env")
         self.assertEqual(cfgmgr.get("FOO"), "bar")
+
+
+# --------------------------------------------------------------------------
+# deep_freeze
+# --------------------------------------------------------------------------
+
+class DeepFreezeTest(unittest.TestCase):
+
+    def test_dict_becomes_mappingproxy(self):
+        frozen = cfgmgr.deep_freeze({"a": 1})
+        self.assertIsInstance(frozen, MappingProxyType)
+
+    def test_list_becomes_tuple(self):
+        frozen = cfgmgr.deep_freeze([1, 2, 3])
+        self.assertEqual(frozen, (1, 2, 3))
+        self.assertIsInstance(frozen, tuple)
+
+    def test_nested_recursively_frozen(self):
+        frozen = cfgmgr.deep_freeze({"a": [{"b": 1}], "c": {"d": 2}})
+        self.assertIsInstance(frozen["a"], tuple)
+        self.assertIsInstance(frozen["a"][0], MappingProxyType)
+        self.assertIsInstance(frozen["c"], MappingProxyType)
+
+    def test_string_not_split_into_sequence(self):
+        self.assertEqual(cfgmgr.deep_freeze("abc"), "abc")
+        self.assertEqual(cfgmgr.deep_freeze({"s": "abc"})["s"], "abc")
+
+    def test_scalars_unchanged(self):
+        for v in (5, None, True, 1.5):
+            self.assertEqual(cfgmgr.deep_freeze(v), v)
+
+    def test_frozen_mapping_rejects_mutation(self):
+        frozen = cfgmgr.deep_freeze({"a": 1})
+        with self.assertRaises(TypeError):
+            frozen["a"] = 2
+
+    def test_frozen_nested_mapping_rejects_mutation(self):
+        frozen = cfgmgr.deep_freeze({"outer": {"inner": 1}})
+        with self.assertRaises(TypeError):
+            frozen["outer"]["inner"] = 2
+
+    def test_frozen_sequence_rejects_mutation(self):
+        frozen = cfgmgr.deep_freeze({"list": [1]})
+        with self.assertRaises(AttributeError):
+            frozen["list"].append(2)
+
+
+# --------------------------------------------------------------------------
+# deep_merge   (deep_merge(prim, sec) -- prim wins)
+# --------------------------------------------------------------------------
+
+class DeepMergeTest(unittest.TestCase):
+
+    def test_disjoint_keys_union(self):
+        self.assertEqual(
+            dict(cfgmgr.deep_merge({"a": 1}, {"b": 2})),
+            {"a": 1, "b": 2},
+        )
+
+    def test_shared_scalar_primary_wins(self):
+        self.assertEqual(cfgmgr.deep_merge({"a": 1}, {"a": 2})["a"], 1)
+
+    def test_nested_mapping_recursive_merge(self):
+        merged = cfgmgr.deep_merge(
+            {"d": {"x": 1}},
+            {"d": {"x": 9, "y": 2}},
+        )
+        # x: primary wins; y: only in secondary, preserved.
+        self.assertEqual(dict(merged["d"]), {"x": 1, "y": 2})
+
+    def test_three_levels_deep(self):
+        merged = cfgmgr.deep_merge(
+            {"a": {"b": {"c": "new"}}},
+            {"a": {"b": {"c": "old", "d": "keep"}}},
+        )
+        self.assertEqual(dict(merged["a"]["b"]), {"c": "new", "d": "keep"})
+
+    def test_list_overrides_not_extends(self):
+        # Conventional behaviour: lists replace, they don't concatenate.
+        merged = cfgmgr.deep_merge({"l": [1, 2]}, {"l": [3, 4, 5]})
+        self.assertEqual(merged["l"], [1, 2])
+
+    def test_type_mismatch_primary_wins(self):
+        self.assertEqual(
+            cfgmgr.deep_merge({"k": {"a": 1}}, {"k": "scalar"})["k"],
+            {"a": 1},
+        )
+        self.assertEqual(
+            cfgmgr.deep_merge({"k": "scalar"}, {"k": {"a": 1}})["k"],
+            "scalar",
+        )
+
+    def test_non_mapping_returns_primary(self):
+        self.assertEqual(cfgmgr.deep_merge("x", "y"), "x")
+        self.assertEqual(cfgmgr.deep_merge(5, {"a": 1}), 5)
+
+    def test_result_is_frozen(self):
+        merged = cfgmgr.deep_merge({"d": {"x": 1}}, {"d": {"x": 2}})
+        self.assertIsInstance(merged, MappingProxyType)
+        self.assertIsInstance(merged["d"], MappingProxyType)
+
+    def test_inputs_not_mutated(self):
+        prim = {"d": {"x": 1}}
+        sec = {"d": {"x": 2, "y": 3}}
+        cfgmgr.deep_merge(prim, sec)
+        self.assertEqual(prim, {"d": {"x": 1}})
+        self.assertEqual(sec, {"d": {"x": 2, "y": 3}})
+
+
+# --------------------------------------------------------------------------
+# IncludeLoader
+# --------------------------------------------------------------------------
+
+class StaticDictLoader(cfgmgr.Loader):
+    '''In-memory Loader that advertises itself as static (frozen).'''
+    static = True
+
+    def __init__(self, values):
+        self._values = cfgmgr.deep_freeze(values)
+
+    def __getitem__(self, key):
+        return self._values[key]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+
+class IncludeLoaderTest(unittest.TestCase):
+
+    def test_key_in_including_only(self):
+        il = cfgmgr.IncludeLoader(StaticDictLoader({"a": "inc"}),
+                                  StaticDictLoader({"b": "base"}))
+        self.assertEqual(il["a"], "inc")
+
+    def test_key_in_included_only(self):
+        il = cfgmgr.IncludeLoader(StaticDictLoader({"a": "inc"}),
+                                  StaticDictLoader({"b": "base"}))
+        self.assertEqual(il["b"], "base")
+
+    def test_shared_scalar_including_wins(self):
+        il = cfgmgr.IncludeLoader(StaticDictLoader({"k": "including"}),
+                                  StaticDictLoader({"k": "included"}))
+        self.assertEqual(il["k"], "including")
+
+    def test_shared_nested_mapping_merged(self):
+        il = cfgmgr.IncludeLoader(
+            StaticDictLoader({"d": {"x": "new"}}),
+            StaticDictLoader({"d": {"x": "old", "y": "keep"}}),
+        )
+        self.assertEqual(dict(il["d"]), {"x": "new", "y": "keep"})
+
+    def test_missing_key_raises_keyerror(self):
+        il = cfgmgr.IncludeLoader(StaticDictLoader({"a": 1}),
+                                  StaticDictLoader({"b": 2}))
+        with self.assertRaises(KeyError):
+            il["missing"]
+
+    def test_contains_is_union(self):
+        il = cfgmgr.IncludeLoader(StaticDictLoader({"a": 1}),
+                                  StaticDictLoader({"b": 2}))
+        self.assertIn("a", il)
+        self.assertIn("b", il)
+        self.assertNotIn("c", il)
+
+    def test_iter_dedups_shared_keys(self):
+        il = cfgmgr.IncludeLoader(StaticDictLoader({"a": 1, "shared": 1}),
+                                  StaticDictLoader({"b": 2, "shared": 2}))
+        self.assertEqual(set(il), {"a", "b", "shared"})
+        self.assertEqual(len(il), 3)
+
+    def test_rejects_nonstatic_including(self):
+        with self.assertRaises(TypeError):
+            cfgmgr.IncludeLoader(DictLoader({"a": 1}),
+                                 StaticDictLoader({"b": 2}))
+
+    def test_rejects_nonstatic_included(self):
+        with self.assertRaises(TypeError):
+            cfgmgr.IncludeLoader(StaticDictLoader({"a": 1}),
+                                 DictLoader({"b": 2}))
+
+    def test_chained_includes(self):
+        # An IncludeLoader is itself static, so it can be nested.
+        inner = cfgmgr.IncludeLoader(StaticDictLoader({"a": "mid"}),
+                                     StaticDictLoader({"a": "base", "b": "base"}))
+        outer = cfgmgr.IncludeLoader(StaticDictLoader({"a": "top"}), inner)
+        self.assertEqual(outer["a"], "top")
+        self.assertEqual(outer["b"], "base")
+
+    def test_getitem_memoized(self):
+        il = cfgmgr.IncludeLoader(StaticDictLoader({"d": {"x": 1}}),
+                                  StaticDictLoader({"d": {"y": 2}}))
+        self.assertIs(il["d"], il["d"])
+
+
+# --------------------------------------------------------------------------
+# FileLoader strip_keys / _stripped
+# --------------------------------------------------------------------------
+
+class FileLoaderStripKeysTest(unittest.TestCase):
+
+    def setUp(self):
+        self.start_dir = os.getcwd()
+        if os.path.exists("tmp_test"):
+            shutil.rmtree("tmp_test")
+        os.makedirs("tmp_test")
+        with open("tmp_test/cfg.json", 'w') as fp:
+            json.dump({"include-cfg": "other.json", "A": 1, "B": 2}, fp)
+
+    def tearDown(self):
+        os.chdir(self.start_dir)
+        shutil.rmtree("tmp_test")
+
+    def test_stripped_key_absent_from_config(self):
+        loader = cfgmgr.JSONLoader("tmp_test/cfg.json",
+                                   strip_keys=("include-cfg",))
+        self.assertNotIn("include-cfg", loader)
+        self.assertEqual(loader["A"], 1)
+
+    def test_stripped_values_recorded(self):
+        loader = cfgmgr.JSONLoader("tmp_test/cfg.json",
+                                   strip_keys=("include-cfg",))
+        self.assertEqual(loader._stripped, {"include-cfg": "other.json"})
+
+    def test_no_strip_keys_keeps_everything(self):
+        loader = cfgmgr.JSONLoader("tmp_test/cfg.json")
+        self.assertIn("include-cfg", loader)
+        self.assertEqual(loader._stripped, {})
+
+    def test_strip_key_not_present_is_noop(self):
+        loader = cfgmgr.JSONLoader("tmp_test/cfg.json",
+                                   strip_keys=("not-there",))
+        self.assertEqual(loader._stripped, {})
+        self.assertIn("include-cfg", loader)
+
+
+# --------------------------------------------------------------------------
+# Config as a MutableMapping  (__delitem__, __iter__, __len__)
+# --------------------------------------------------------------------------
+
+class ConfigMutableMappingTest(unittest.TestCase):
+
+    def test_is_mutablemapping(self):
+        from collections.abc import MutableMapping
+        self.assertIsInstance(cfgmgr.Config([]), MutableMapping)
+
+    def test_delitem_override_key(self):
+        cfg = cfgmgr.Config([], k="v")
+        del cfg["k"]
+        self.assertNotIn("k", cfg)
+
+    def test_delitem_loader_key(self):
+        # Regression guard: deleting a key that lives only in a loader
+        # must not raise (it is masked, not popped from _overrides).
+        cfg = cfgmgr.Config([DictLoader({"a": 1})])
+        del cfg["a"]
+        self.assertNotIn("a", cfg)
+        self.assertEqual(cfg.get("a", "default"), "default")
+
+    def test_delitem_absent_raises(self):
+        cfg = cfgmgr.Config([DictLoader({"a": 1})])
+        with self.assertRaises(KeyError):
+            del cfg["missing"]
+
+    def test_delitem_twice_raises(self):
+        cfg = cfgmgr.Config([DictLoader({"a": 1})])
+        del cfg["a"]
+        with self.assertRaises(KeyError):
+            del cfg["a"]
+
+    def test_set_after_delete_resurrects(self):
+        cfg = cfgmgr.Config([DictLoader({"a": "loader"})])
+        del cfg["a"]
+        cfg["a"] = "new"
+        self.assertEqual(cfg["a"], "new")
+
+    def test_iter_includes_overrides_and_loaders(self):
+        cfg = cfgmgr.Config([DictLoader({"a": 1, "b": 2})], c=3)
+        self.assertEqual(set(cfg), {"a", "b", "c"})
+
+    def test_iter_dedups_across_loaders(self):
+        cfg = cfgmgr.Config([DictLoader({"x": 1}), DictLoader({"x": 2})])
+        self.assertEqual(list(cfg).count("x"), 1)
+
+    def test_iter_excludes_deleted_keys(self):
+        cfg = cfgmgr.Config([DictLoader({"a": 1, "b": 2})])
+        del cfg["a"]
+        self.assertEqual(set(cfg), {"b"})
+
+    def test_len_counts_distinct_live_keys(self):
+        cfg = cfgmgr.Config([DictLoader({"a": 1, "b": 2})], c=3)
+        self.assertEqual(len(cfg), 3)
+        del cfg["a"]
+        self.assertEqual(len(cfg), 2)
+
+
+# --------------------------------------------------------------------------
+# Includes:  resolve_includes / find_relative_file / make_config(include_key=)
+# --------------------------------------------------------------------------
+
+class _IncludeTreeTestCase(unittest.TestCase):
+    '''Builds a tree of JSON config files wired together by `include-cfg`.'''
+
+    def setUp(self):
+        self.start_dir = os.getcwd()
+        if os.path.exists("tmp_test"):
+            shutil.rmtree("tmp_test")
+        os.makedirs("tmp_test/sub")
+
+        def write(path, data):
+            with open(os.path.join("tmp_test", path), 'w') as fp:
+                json.dump(data, fp)
+
+        write("base.json", {"A": "base", "B": "base",
+                            "deep": {"x": "base", "y": "base"}})
+        write("mid.json", {"include-cfg": "base.json", "B": "mid",
+                           "deep": {"y": "mid", "z": "mid"}})
+        write("entry.json", {"include-cfg": "mid.json", "A": "entry",
+                             "deep": {"x": "entry"}})
+        write("noinc.json", {"A": "solo"})
+        write("selfref.json", {"include-cfg": "selfref.json", "A": 1})
+        write("cyc_a.json", {"include-cfg": "cyc_b.json", "A": 1})
+        write("cyc_b.json", {"include-cfg": "cyc_a.json", "B": 2})
+        write("badref.json", {"include-cfg": "nonexistent.json"})
+        write("entry_sub.json", {"include-cfg": "sub/child.json",
+                                 "A": "entry_sub"})
+        write("sub/child.json", {"include-cfg": "../base.json", "C": "child"})
+        os.chdir("tmp_test")
+
+    def tearDown(self):
+        os.chdir(self.start_dir)
+        shutil.rmtree("tmp_test")
+
+
+class ResolveIncludesTest(_IncludeTreeTestCase):
+
+    def test_single_file_no_include(self):
+        loader = cfgmgr.resolve_includes("noinc.json")
+        self.assertIsInstance(loader, cfgmgr.JSONLoader)
+        self.assertEqual(loader["A"], "solo")
+
+    def test_two_file_chain(self):
+        loader = cfgmgr.resolve_includes("mid.json")
+        self.assertIsInstance(loader, cfgmgr.IncludeLoader)
+        self.assertEqual(loader["B"], "mid")    # including wins
+        self.assertEqual(loader["A"], "base")   # only in included
+
+    def test_three_file_chain(self):
+        # Exercises nested IncludeLoader (IncludeLoader must be static).
+        loader = cfgmgr.resolve_includes("entry.json")
+        self.assertEqual(loader["A"], "entry")
+        self.assertEqual(loader["B"], "mid")
+
+    def test_nested_value_merged_across_chain(self):
+        loader = cfgmgr.resolve_includes("entry.json")
+        self.assertEqual(
+            dict(loader["deep"]),
+            {"x": "entry", "y": "mid", "z": "mid"},
+        )
+
+    def test_directive_key_is_stripped(self):
+        loader = cfgmgr.resolve_includes("entry.json")
+        self.assertNotIn("include-cfg", loader)
+
+    def test_merged_values_are_frozen(self):
+        loader = cfgmgr.resolve_includes("entry.json")
+        self.assertIsInstance(loader["deep"], MappingProxyType)
+
+    def test_cycle_detected(self):
+        with self.assertRaises(cfgmgr.IncludeCycleError):
+            cfgmgr.resolve_includes("cyc_a.json")
+
+    def test_self_include_detected(self):
+        with self.assertRaises(cfgmgr.IncludeCycleError):
+            cfgmgr.resolve_includes("selfref.json")
+
+    def test_missing_include_target_raises(self):
+        with self.assertRaises(FileNotFoundError):
+            cfgmgr.resolve_includes("badref.json")
+
+    def test_relative_include_resolved_from_subdir(self):
+        loader = cfgmgr.resolve_includes("entry_sub.json")
+        self.assertEqual(loader["A"], "entry_sub")
+        self.assertEqual(loader["C"], "child")    # tmp_test/sub/child.json
+        self.assertEqual(loader["B"], "base")     # via sub/child -> ../base.json
+
+
+class FindRelativeFileTest(_IncludeTreeTestCase):
+
+    def test_none_target_returns_none(self):
+        base = os.path.realpath("entry.json")
+        self.assertIsNone(cfgmgr.find_relative_file(base, None))
+
+    def test_relative_target_found(self):
+        base = os.path.realpath("entry.json")
+        found = cfgmgr.find_relative_file(base, "base.json")
+        self.assertTrue(os.path.isfile(found))
+
+    def test_relative_target_missing_raises(self):
+        base = os.path.realpath("entry.json")
+        with self.assertRaises(FileNotFoundError):
+            cfgmgr.find_relative_file(base, "nonexistent.json")
+
+    def test_absolute_target_found(self):
+        base = os.path.realpath("entry.json")
+        target = os.path.realpath("base.json")
+        self.assertEqual(cfgmgr.find_relative_file(base, target), target)
+
+    def test_absolute_target_missing_raises(self):
+        base = os.path.realpath("entry.json")
+        with self.assertRaises(FileNotFoundError):
+            cfgmgr.find_relative_file(base, "/no/such/path/xyz.json")
+
+
+class MakeConfigIncludeTest(_IncludeTreeTestCase):
+
+    def test_include_chain_merged(self):
+        cfgmgr.make_config(file_path="entry.json", include_key="include-cfg")
+        self.assertEqual(cfgmgr.get("A"), "entry")
+        self.assertEqual(cfgmgr.get("B"), "mid")
+
+    def test_nested_value_merged(self):
+        cfgmgr.make_config(file_path="entry.json", include_key="include-cfg")
+        self.assertEqual(
+            dict(cfgmgr.get("deep")),
+            {"x": "entry", "y": "mid", "z": "mid"},
+        )
+
+    def test_include_key_requires_file_path(self):
+        with self.assertRaises(ValueError):
+            cfgmgr.make_config(include_key="include-cfg")
+
+    def test_cycle_propagates(self):
+        with self.assertRaises(cfgmgr.IncludeCycleError):
+            cfgmgr.make_config(file_path="cyc_a.json",
+                               include_key="include-cfg")
+
+    def test_env_overrides_included_config(self):
+        os.environ["CFGMGRINC_A"] = "from_env"
+        self.addCleanup(os.environ.pop, "CFGMGRINC_A", None)
+        cfgmgr.make_config(file_path="entry.json", include_key="include-cfg",
+                           env_prefix="CFGMGRINC_")
+        self.assertEqual(cfgmgr.get("A"), "from_env")
 
 
 if __name__ == '__main__':
