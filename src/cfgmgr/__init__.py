@@ -1,3 +1,5 @@
+'''cfg-mgr: Simple interface for loading and using configurations
+'''
 import os
 import json
 import pathlib
@@ -29,7 +31,9 @@ except ModuleNotFoundError:
 
 
 __all__ = ['Loader', 'FileLoader', 'EnvLoader', 'JSONLoader', 'TOMLLoader', 'YAMLLoader', 'DotEnvLoader',
-           'Config', 'make_config']
+           'IncludeLoader', 'IncludeCycleError', 'Config', 'make_config', 'getkey', 'setkey', 'get']
+
+
 _MISSING = object()
 
 
@@ -48,10 +52,10 @@ fileloaders = _FileLoaders()
 
 class Loader(Mapping):
     '''Interface for loaders
-    Just an alias for Mapping currently, may add stricter constraints in the future
     Override __init__ to load the key value pairs
     Override get to provide value when asked for a key
     get() is called by Config.get() so values from a loader can be dynamically constructed
+    Largely just a Mapping, but with a flag to represent mutability of internal data
     '''
     static = False
 
