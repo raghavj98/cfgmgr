@@ -13,6 +13,7 @@ import pathlib
 import logging
 import builtins
 import functools
+import itertools
 from collections import UserDict
 from collections.abc import Mapping, MutableMapping, Sequence
 from types import MappingProxyType
@@ -63,7 +64,6 @@ class Loader(Mapping):
     get() is called by Config.get() so values from a loader can be dynamically constructed
     '''
     static = False
-    # TODO?: Heirarchical loaders
 
 
 class EnvLoader(Loader):
@@ -184,9 +184,8 @@ class IncludeLoader(Loader):
 
 class Config(MutableMapping):
     # TODO?: Type validation
-    # TODO?: Dynamic key value consturction
     def __init__(self, loaders, **kwargs):
-        ''' loaders is an iterable of Loader
+        '''loaders is an iterable of Loader
         Loader implements the Mapping interface
         Config implements the MutableMapping interface
         Priority order is inverted - a later Loader overrides earlier ones.
@@ -225,17 +224,12 @@ class Config(MutableMapping):
         self._deleted.add(key)
 
     def __iter__(self):
-        # TODO: order preserving implementation using itertools to chain loaders and _overrides
-        _yielded = builtins.set()
-        for key in self._overrides:
-            if key not in self._deleted:
-                _yielded.add(key)
+        loader_chain = itertools.chain.from_iterable(reversed(self.loaders))
+        seen = builtins.set(self._deleted)
+        for key in itertools.chain(self._overrides, loader_chain):
+            if key not in seen:
+                seen.add(key)
                 yield key
-        for loader in reversed(self.loaders):
-            for key in loader:
-                if key not in _yielded and key not in self._deleted:
-                    _yielded.add(key)
-                    yield key
 
     def __len__(self):
         # Warning, expensive!
