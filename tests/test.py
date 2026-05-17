@@ -67,34 +67,34 @@ class EnvLoaderTest(unittest.TestCase):
     def test_prefix(self):
         os.environ["CFGMGRTEST_FOO"] = "bar"
         cfgmgr.make_config(env_prefix="CFGMGRTEST_")
-        self.assertEqual(cfgmgr.get("FOO"), "bar")
+        self.assertEqual(cfgmgr.getkey("FOO"), "bar")
 
     def test_noprefix(self):
         os.environ["CFGMGRTEST_FOO"] = "bar"
         cfgmgr.make_config(env_prefix="")
-        self.assertEqual(cfgmgr.get("CFGMGRTEST_FOO"), "bar")
+        self.assertEqual(cfgmgr.getkey("CFGMGRTEST_FOO"), "bar")
 
     def test_negative_prefix(self):
         os.environ["FOO"] = "bar"
         cfgmgr.make_config(env_prefix="CFGMGRTEST_")
-        self.assertEqual(cfgmgr.get("FOO"), None)
+        self.assertEqual(cfgmgr.getkey("FOO"), None)
 
     def test_negative_noprefix(self):
         os.environ["FOO"] = "bar"
         cfgmgr.make_config()
-        self.assertEqual(cfgmgr.get("FOO"), None)
+        self.assertEqual(cfgmgr.getkey("FOO"), None)
 
     def test_default_for_missing_key(self):
         cfgmgr.make_config(env_prefix="CFGMGRTEST_")
-        self.assertEqual(cfgmgr.get("MISSING", "fallback"), "fallback")
+        self.assertEqual(cfgmgr.getkey("MISSING", "fallback"), "fallback")
 
     def test_dynamic_resolution(self):
         # Values are resolved on each get(), so env changes are reflected.
         cfgmgr.make_config(env_prefix="CFGMGRTEST_")
-        self.assertIsNone(cfgmgr.get("DYNAMIC"))
+        self.assertIsNone(cfgmgr.getkey("DYNAMIC"))
         os.environ["CFGMGRTEST_DYNAMIC"] = "now_set"
         self.addCleanup(os.environ.pop, "CFGMGRTEST_DYNAMIC", None)
-        self.assertEqual(cfgmgr.get("DYNAMIC"), "now_set")
+        self.assertEqual(cfgmgr.getkey("DYNAMIC"), "now_set")
 
 
 # --------------------------------------------------------------------------
@@ -150,24 +150,24 @@ class JSONLoaderTest(unittest.TestCase):
 
     def test_positive(self):
         cfgmgr.make_config(file_path="file1.json", find_file=True)
-        self.assertEqual(cfgmgr.get("FOO"), "bar")
+        self.assertEqual(cfgmgr.getkey("FOO"), "bar")
 
     def test_find_file_in_cwd(self):
         with open("local.json", 'w') as fp:
             json.dump({"LOCAL": "value"}, fp)
         cfgmgr.make_config(file_path="local.json", find_file=True)
-        self.assertEqual(cfgmgr.get("LOCAL"), "value")
+        self.assertEqual(cfgmgr.getkey("LOCAL"), "value")
 
     def test_file_path_without_find_file(self):
         # Regression guard: file_path given, find_file omitted.
         with open("local.json", 'w') as fp:
             json.dump({"LOCAL": "value"}, fp)
         cfgmgr.make_config(file_path="local.json")
-        self.assertEqual(cfgmgr.get("LOCAL"), "value")
+        self.assertEqual(cfgmgr.getkey("LOCAL"), "value")
 
     def test_missing_key_returns_default(self):
         cfgmgr.make_config(file_path="file1.json", find_file=True)
-        self.assertEqual(cfgmgr.get("MISSING", "fallback"), "fallback")
+        self.assertEqual(cfgmgr.getkey("MISSING", "fallback"), "fallback")
 
     def tearDown(self):
         os.chdir(self.start_dir)
@@ -281,35 +281,35 @@ class MakeConfigTest(unittest.TestCase):
 
     def test_no_args(self):
         cfgmgr.make_config()
-        self.assertIsNone(cfgmgr.get("anything"))
-        self.assertEqual(cfgmgr.get("anything", "d"), "d")
+        self.assertIsNone(cfgmgr.getkey("anything"))
+        self.assertEqual(cfgmgr.getkey("anything", "d"), "d")
 
     def test_kwargs_overrides(self):
         cfgmgr.make_config(FOO="kwarg_value")
-        self.assertEqual(cfgmgr.get("FOO"), "kwarg_value")
+        self.assertEqual(cfgmgr.getkey("FOO"), "kwarg_value")
 
     def test_kwargs_beat_loaders(self):
         os.environ["CFGMGRTEST_K"] = "env_value"
         self.addCleanup(os.environ.pop, "CFGMGRTEST_K", None)
         cfgmgr.make_config(env_prefix="CFGMGRTEST_", K="kwarg_value")
-        self.assertEqual(cfgmgr.get("K"), "kwarg_value")
+        self.assertEqual(cfgmgr.getkey("K"), "kwarg_value")
 
     def test_env_overrides_file(self):
         os.environ["CFGMGRTEST_SHARED"] = "from_env"
         self.addCleanup(os.environ.pop, "CFGMGRTEST_SHARED", None)
         cfgmgr.make_config(env_prefix="CFGMGRTEST_", file_path="config.json")
-        self.assertEqual(cfgmgr.get("SHARED"), "from_env")
+        self.assertEqual(cfgmgr.getkey("SHARED"), "from_env")
 
     def test_file_value_survives_when_env_missing(self):
         cfgmgr.make_config(env_prefix="CFGMGRTEST_", file_path="config.json")
-        self.assertEqual(cfgmgr.get("ONLY_FILE"), "file_value")
+        self.assertEqual(cfgmgr.getkey("ONLY_FILE"), "file_value")
 
     def test_reinit_resets_config(self):
         cfgmgr.make_config(FOO="first")
         cfgmgr.make_config(FOO="second")
-        self.assertEqual(cfgmgr.get("FOO"), "second")
+        self.assertEqual(cfgmgr.getkey("FOO"), "second")
         cfgmgr.make_config()
-        self.assertIsNone(cfgmgr.get("FOO"))
+        self.assertIsNone(cfgmgr.getkey("FOO"))
 
     def test_unsupported_extension(self):
         with self.assertRaises(ValueError):
@@ -325,36 +325,51 @@ class MakeConfigTest(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
-# Module-level get / set
+# Module-level getkey / setkey / get
 # --------------------------------------------------------------------------
 
 class GetSetTest(unittest.TestCase):
 
-    def test_set_then_get(self):
+    def test_setkey_then_getkey(self):
         cfgmgr.make_config()
-        cfgmgr.set("k", "v")
-        self.assertEqual(cfgmgr.get("k"), "v")
+        cfgmgr.setkey("k", "v")
+        self.assertEqual(cfgmgr.getkey("k"), "v")
 
-    def test_get_default(self):
+    def test_getkey_default(self):
         cfgmgr.make_config()
-        self.assertEqual(cfgmgr.get("missing", "d"), "d")
+        self.assertEqual(cfgmgr.getkey("missing", "d"), "d")
 
-    def test_set_overrides_loader(self):
+    def test_setkey_overrides_loader(self):
         os.environ["CFGMGRTEST_X"] = "env_value"
         self.addCleanup(os.environ.pop, "CFGMGRTEST_X", None)
         cfgmgr.make_config(env_prefix="CFGMGRTEST_")
-        cfgmgr.set("X", "set_value")
-        self.assertEqual(cfgmgr.get("X"), "set_value")
+        cfgmgr.setkey("X", "set_value")
+        self.assertEqual(cfgmgr.getkey("X"), "set_value")
 
-    def test_get_before_make_config(self):
+    def test_getkey_before_make_config(self):
         cfgmgr._config = None
         with self.assertRaises(AttributeError):
-            cfgmgr.get("k")
+            cfgmgr.getkey("k")
 
-    def test_set_before_make_config(self):
+    def test_setkey_before_make_config(self):
         cfgmgr._config = None
         with self.assertRaises(AttributeError):
-            cfgmgr.set("k", "v")
+            cfgmgr.setkey("k", "v")
+
+    def test_get_returns_live_config(self):
+        cfgmgr.make_config()
+        cfg = cfgmgr.get()
+        self.assertIsInstance(cfg, cfgmgr.Config)
+        self.assertIs(cfg, cfgmgr._config)
+
+    def test_get_reflects_setkey(self):
+        cfgmgr.make_config()
+        cfgmgr.setkey("k", "v")
+        self.assertEqual(cfgmgr.get()["k"], "v")
+
+    def test_get_before_make_config_returns_none(self):
+        cfgmgr._config = None
+        self.assertIsNone(cfgmgr.get())
 
 
 # --------------------------------------------------------------------------
@@ -454,7 +469,7 @@ class RegistryTest(unittest.TestCase):
     def test_registered_loader_used_by_make_config(self):
         cfgmgr.fileloaders.register(".stub")(StubLoader)
         cfgmgr.make_config(file_path="anything.stub")
-        self.assertEqual(cfgmgr.get("STUB"), "stub_value")
+        self.assertEqual(cfgmgr.getkey("STUB"), "stub_value")
 
 
 class LoaderABCTest(unittest.TestCase):
@@ -679,7 +694,7 @@ class TOMLLoaderTest(unittest.TestCase):
     def test_make_config_with_toml(self):
         os.chdir("tmp_test")
         cfgmgr.make_config(file_path="good.toml")
-        self.assertEqual(cfgmgr.get("FOO"), "bar")
+        self.assertEqual(cfgmgr.getkey("FOO"), "bar")
 
 
 # --------------------------------------------------------------------------
@@ -726,7 +741,7 @@ class DotEnvLoaderTest(unittest.TestCase):
     def test_make_config_with_dotenv(self):
         os.chdir("tmp_test")
         cfgmgr.make_config(file_path="config.env")
-        self.assertEqual(cfgmgr.get("FOO"), "bar")
+        self.assertEqual(cfgmgr.getkey("FOO"), "bar")
 
 
 # --------------------------------------------------------------------------
@@ -1147,13 +1162,13 @@ class MakeConfigIncludeTest(_IncludeTreeTestCase):
 
     def test_include_chain_merged(self):
         cfgmgr.make_config(file_path="entry.json", include_key="include-cfg")
-        self.assertEqual(cfgmgr.get("A"), "entry")
-        self.assertEqual(cfgmgr.get("B"), "mid")
+        self.assertEqual(cfgmgr.getkey("A"), "entry")
+        self.assertEqual(cfgmgr.getkey("B"), "mid")
 
     def test_nested_value_merged(self):
         cfgmgr.make_config(file_path="entry.json", include_key="include-cfg")
         self.assertEqual(
-            dict(cfgmgr.get("deep")),
+            dict(cfgmgr.getkey("deep")),
             {"x": "entry", "y": "mid", "z": "mid"},
         )
 
@@ -1171,7 +1186,7 @@ class MakeConfigIncludeTest(_IncludeTreeTestCase):
         self.addCleanup(os.environ.pop, "CFGMGRINC_A", None)
         cfgmgr.make_config(file_path="entry.json", include_key="include-cfg",
                            env_prefix="CFGMGRINC_")
-        self.assertEqual(cfgmgr.get("A"), "from_env")
+        self.assertEqual(cfgmgr.getkey("A"), "from_env")
 
 
 if __name__ == '__main__':

@@ -1,17 +1,7 @@
-'''Usage
-
-import cfgmgr
-
-cfgmgr.make_config(env_prefix="CFG_", file_path="config.json", find_file=True)
-some_val = cfgmgr.get('key')
-cfgmgr.set('key', 'new_val')
-'''
-
 import os
 import json
 import pathlib
 import logging
-import builtins
 import functools
 import itertools
 from collections import UserDict
@@ -193,7 +183,7 @@ class Config(MutableMapping):
         **kwargs has highest priority - overrides everything
         '''
         self.loaders = list(loaders)
-        self._deleted = builtins.set()
+        self._deleted = set()
         self._overrides = dict(kwargs)
 
     def get(self, key, default=None):
@@ -225,7 +215,7 @@ class Config(MutableMapping):
 
     def __iter__(self):
         loader_chain = itertools.chain.from_iterable(reversed(self.loaders))
-        seen = builtins.set(self._deleted)
+        seen = set(self._deleted)
         for key in itertools.chain(self._overrides, loader_chain):
             if key not in seen:
                 seen.add(key)
@@ -258,7 +248,11 @@ def make_config(env_prefix=None, file_path=None, find_file=False, include_key=No
     _config = Config(_loaders, **kwargs)
 
 
-def get(key, default=None):
+def get():
+    return _config
+
+
+def getkey(key, default=None):
     # Intentionally not exposed in __all__ to prevent namespace collisions
     if _config is None:
         # Log, and let _config.get raise
@@ -266,7 +260,7 @@ def get(key, default=None):
     return _config.get(key, default)
 
 
-def set(key, value):
+def setkey(key, value):
     # Intentionally not exposed in __all__ to prevent namespace collisions
     if _config is None:
         # Log, and let _config.set raise
