@@ -59,14 +59,15 @@ fileloaders = _FileLoaders()
 
 
 class Loader(Mapping):
-    """Interface
+    """Abstract interface for configuration data sources.
 
-    A Loader is a Mapping on a data souce for a configuration.
+    A Loader is a Mapping over a data source for a configuration.
 
     Attributes:
-        static (bool): True if the underlying data source is mutable.
+        static (bool): True if the underlying data source is immutable.
             Note: A loader itself is always immutable, but the underlying data source
-            may be mutable through other means (like EnvLoader via os.environ).
+            may still be mutable through other means (like EnvLoader via os.environ),
+            in which case static is False.
     """
     static = False
 
@@ -78,7 +79,7 @@ class EnvLoader(Loader):
         """Initialize with environment variables beginning with `prefix`.
 
         Only variables beginning with `prefix` are exposed through this loader
-        Ex. `prefix=""` to load all env vars
+        Ex. `prefix = ""` to load all env vars
         """
         self.prefix = prefix
 
@@ -98,7 +99,7 @@ class EnvLoader(Loader):
 class FileLoader(Loader):
     """Abstract base class for loaders reading from a file.
 
-    `FileLoader`s have `static = True` since the stored internal state is immutable.
+    `FileLoader` has `static = True` since the stored internal state is immutable.
     """
     static = True
 
@@ -174,15 +175,15 @@ class YAMLLoader(FileLoader):
 
 
 class IncludeLoader(Loader):
-    """Composite `Loader` for files that includes another file."""
+    """Composite `Loader` subclass for files that includes another file."""
     static = True
 
     def __init__(self, including, included):
-        """Construct a composite `Loader` out of two static `Loader` instances.
+        """Construct a composite loader out of two static `Loader` instances.
 
         Args:
-            including (Loader): `Loader` for file that includes the other
-            included  (Loader): `Loader` for the file being included
+            including (Loader): Loader for file that includes the other
+            included  (Loader): Loader for the file being included
 
         Raises:
             TypeError: If either `including` or `included` are non static
@@ -220,22 +221,22 @@ class IncludeLoader(Loader):
 
 
 class Config(MutableMapping):
-    """Primary interface for configuration access
+    """Primary interface for configuration access.
 
-    Composed of an ordered set of `Loader`s. Implements `MutableMapping`.
-    Contained `Loader`s shadow each others' keys.
+    Composed of an ordered set of loaders. Implements `MutableMapping`.
+    Contained loaders shadow each others' keys.
     Setting a key using MutableMapping methods shadows all loaders.
 
-    Performance warning: `len` on a `Config` iterates over it (albeit non exhausting)
+    Performance warning: `len` on a `Config` instance iterates over it (albeit non exhausting)
     """
     def __init__(self, loaders, **kwargs):
         """Construct a Config from multiple loaders
 
         Args:
-            loaders (iterable[Loader]): Source `Loader`s for this `Config`
-                Priority order: later `Loader`s override the ones before them.
+            loaders (iterable[Loader]): Source loaders for this config
+                Priority order: later loaders override the ones before them.
                 Ex. If you pass in [FileLoader, EnvLoader], values from EnvLoader will override those from FileLoader
-            **kwargs: Highest priority key value pairs in the `Config` - overrides everything
+            **kwargs: Highest priority key value pairs in the config - overrides everything
         """
         self.loaders = list(loaders)
         self._deleted = set()
@@ -290,13 +291,13 @@ def make_config(env_prefix=None, file_path=None, find_file=False, include_key=No
     """Initialize a global default `Config`.
 
     Args:
-        env_prefix (str): If provided, used to construct an `EnvLoader` for the default `Config`.
-        file_path (str): If provided, used to construct a `FileLoader` for the default `Config`.
-            `make_config` will try to auto detect the appropriate `FileLoader` via the file extension.
+        env_prefix (str): If provided, used to construct an `EnvLoader` instance for the default config.
+        file_path (str): If provided, used to construct a `FileLoader` instance for the default config.
+            `make_config` will try to auto detect the appropriate `FileLoader` subclass via the file extension.
         find_file (bool): If `True`, crawl upwards from current working directory until `file_path` is found.
         include_key (str): Can only be given alongside a `file_path`.
             If given, the value corresponding to it will be treated as another file to load, recursively.
-        **kwargs: Passed to the `Config` initializer, overrides values from all `Loader`s.
+        **kwargs: Passed to `Config.__init__`, overrides values from all loaders.
 
     Raises:
         ValueError: `include_key` given without `file_path`.
@@ -323,21 +324,21 @@ def make_config(env_prefix=None, file_path=None, find_file=False, include_key=No
 
 
 def get():
-    """Get the default `Config`
+    """Get the default global config.
 
     Returns:
-        config (Config): The current global default config
-            Future `make_config` calls will override the current global config.
-            Can be used to "store" configs created by `make_config`.
+        The current global default config.
+        Future `make_config` calls will override the current global config.
+        Can be used to "store" configs created by `make_config`.
     """
     return _config
 
 
 def getkey(key, default=None):
-    """Get a value from the global default config
+    """Get a value from the global default config.
 
     Args:
-        key (str): Passed to `Cofig.get`.
+        key (str): Passed to `Config.get`.
         default (Optional): If `key` is not found, return this instead.
 
     Returns:
@@ -353,7 +354,7 @@ def getkey(key, default=None):
 
 
 def setkey(key, value):
-    """Set a value in the global default config
+    """Set a value in the global default config.
 
     Args:
         key (str): key to set the value for
@@ -366,19 +367,31 @@ def setkey(key, value):
         AttributeError: If no global default config is initialized (via `make_config`)
     """
     if _config is None:
-        # Log, and let _config.set raise
+        # Log, and let _config.__setitem__ raise
         _log.error("set called on uninitialized config, did you call make_config?")
     _config.__setitem__(key, value)
 
 
 class IncludeCycleError(ValueError):
-    pass
+    """Raised when a file's include directives form a cycle."""
 
 
 # Utility
 
 def deep_merge(prim, sec):
-    """TODO: Docs
+    """Recursively merge two mappings, with `prim` taking priority.
+
+    Where both mappings contain the same key and both values are themselves
+    mappings, the values are merged recursively. Otherwise the value from
+    `prim` wins. If either argument is not a mapping, `prim` is returned as-is.
+
+    Args:
+        prim (Any): The higher-priority value.
+        sec (Any): The lower-priority value.
+
+    Returns:
+        The merged result. A read-only `MappingProxyType` when a merge
+        occurred, otherwise `prim` unchanged.
     """
     if not isinstance(prim, Mapping) or not isinstance(sec, Mapping):
         return prim
@@ -389,7 +402,17 @@ def deep_merge(prim, sec):
 
 
 def deep_freeze(val):
-    """TODO: Docs
+    """Recursively convert a value into an immutable structure.
+
+    Mappings become read-only `MappingProxyType`s and sequences (other than
+    `str`, `bytes`, and `bytearray`) become tuples, applied recursively.
+    Any other value is returned unchanged.
+
+    Args:
+        val (Any): The value to freeze.
+
+    Returns:
+        An immutable copy of `val`.
     """
     if isinstance(val, Mapping):
         return MappingProxyType({k: deep_freeze(v) for k, v in val.items()})
@@ -407,7 +430,11 @@ def resolve_includes(entry_file, include_key='include-cfg'):
             Defaults to 'include-cfg'.
 
     Returns:
-        List of constructed `Loader`s, in reverse order of inclusion (as required by `Config` initializer).
+        A `Loader` instance representing the merged data from all found files
+
+    Raises:
+        IncludeCycleError: If the include directives form a cycle.
+        FileNotFoundError: If `entry_file` or any included file cannot be found.
     """
     included = list()
     loaders = list()
@@ -440,7 +467,7 @@ def find_relative_file(base, target):
         Canonical path of the target.
 
     Raises:
-        FileNotFoundError if no file can be found.
+        FileNotFoundError: If no file can be found.
     """
     if target is None:
         return None
@@ -459,10 +486,10 @@ def find_file_up(basename):
         basename (str): Name of the file to find
 
     Returns:
-        None if no such file can be found
+        Path of the found file, or None if no such file can be found.
 
     Raises:
-        ValueError if file extension is not registered to a corresponding `Loader`
+        ValueError: If the file extension is not registered to a corresponding `Loader`.
     """
     # Try to parse extension
     for ext in fileloaders:
@@ -491,7 +518,7 @@ def get_file_loader(file_path, /, **kwargs):
         Constructed `Loader` instance for the file
 
     Raises:
-        ValueError if the extension is not supported
+        ValueError: If the extension is not supported.
     """
     for ext in fileloaders:
         if file_path.endswith(ext):
