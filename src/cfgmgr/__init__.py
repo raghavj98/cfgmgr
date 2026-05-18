@@ -1,4 +1,4 @@
-"""cfg-mgr: Simple interface for loading and using configurations.
+"""Simple interface for loading and using configurations.
 
 Usage::
 
