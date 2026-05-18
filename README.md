@@ -37,3 +37,6 @@ config = cfgmgr.get()          # the global Config object itself
 - Returns the global default `Config` object itself (a `MutableMapping`), or `None` if `make_config`
   has not been called
 - Use it for mapping-style access: `cfgmgr.get()['key']`, `'key' in cfgmgr.get()`, iteration, etc.
+
+## Documentation
+https://raghavj98.github.io/cfgmgr/

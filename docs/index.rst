@@ -32,6 +32,8 @@ All optional file loaders::
 
    pip install cfg-mgr[all]
 
+Or clone/fork the source: https://github.com/raghavj98/cfgmgr
+
 API Reference
 =============
 
