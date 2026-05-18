@@ -1,6 +1,7 @@
 """cfg-mgr: Simple interface for loading and using configurations.
 
-Usage:
+Usage::
+
     import cfgmgr
 
     cfgmgr.make_config(env_prefix="CFG_", file_path="config.json")
@@ -38,9 +39,14 @@ except ModuleNotFoundError:
     dotenv = None
 
 
-__all__ = ['Loader', 'FileLoader', 'EnvLoader', 'JSONLoader', 'TOMLLoader', 'YAMLLoader', 'DotEnvLoader',
-           'IncludeLoader', 'IncludeCycleError', 'Config', 'make_config', 'getkey', 'setkey', 'get']
-
+__all__ = [
+        # Primary public interface
+        'make_config', 'getkey', 'setkey', 'get', 'Config', 'IncludeCycleError',
+        # Loaders
+        'Loader', 'FileLoader', 'EnvLoader', 'JSONLoader', 'TOMLLoader', 'YAMLLoader', 'DotEnvLoader', 'IncludeLoader',
+        # Utility
+        "deep_merge", "deep_freeze", "resolve_includes", "find_relative_file", "find_file_up", "get_file_loader"
+]
 
 _MISSING = object()
 
@@ -62,24 +68,25 @@ class Loader(Mapping):
     """Abstract interface for configuration data sources.
 
     A Loader is a Mapping over a data source for a configuration.
-
-    Attributes:
-        static (bool): True if the underlying data source is immutable.
-            Note: A loader itself is always immutable, but the underlying data source
-            may still be mutable through other means (like EnvLoader via os.environ),
-            in which case static is False.
     """
+
     static = False
+    """bool: True if the underlying data source is immutable.
+
+    A loader itself is always immutable, but the underlying data source may
+    still be mutable through other means (like EnvLoader via os.environ),
+    in which case static is False.
+    """
 
 
 class EnvLoader(Loader):
     """Loader for environment variables."""
 
     def __init__(self, prefix=""):
-        """Initialize with environment variables beginning with `prefix`.
+        """Initialize with environment variables beginning with ``prefix``.
 
-        Only variables beginning with `prefix` are exposed through this loader
-        Ex. `prefix = ""` to load all env vars
+        Only variables beginning with ``prefix`` are exposed through this loader
+        Ex. ``prefix = ""`` to load all env vars
         """
         self.prefix = prefix
 
@@ -99,7 +106,7 @@ class EnvLoader(Loader):
 class FileLoader(Loader):
     """Abstract base class for loaders reading from a file.
 
-    `FileLoader` has `static = True` since the stored internal state is immutable.
+    `FileLoader` has ``static = True`` since the stored internal state is immutable.
     """
     static = True
 
@@ -126,7 +133,7 @@ class FileLoader(Loader):
 class JSONLoader(FileLoader):
     """Load JSON files.
 
-    Uses stdlib `json` module.
+    Uses stdlib ``json`` module.
     """
 
     @staticmethod
@@ -139,7 +146,7 @@ class JSONLoader(FileLoader):
 class TOMLLoader(FileLoader):
     """Load TOML files.
 
-    Requires python>=3.11 since it uses stdlib `tomllib`.
+    Requires python>=3.11 since it uses stdlib ``tomllib``.
     """
 
     @staticmethod
@@ -152,7 +159,7 @@ class TOMLLoader(FileLoader):
 class DotEnvLoader(FileLoader):
     """Load .env files.
 
-    Uses python-dotenv. (`dotenv.dotenv_values`, so `os.environ` is not modified)
+    Uses python-dotenv. (``dotenv.dotenv_values``, so ``os.environ`` is not modified)
     """
 
     @staticmethod
@@ -165,7 +172,7 @@ class DotEnvLoader(FileLoader):
 class YAMLLoader(FileLoader):
     """Load YAML files.
 
-    Uses PyYAML. (`yaml.safe_load`)
+    Uses PyYAML. (``yaml.safe_load``)
     """
 
     @staticmethod
@@ -186,7 +193,7 @@ class IncludeLoader(Loader):
             included  (Loader): Loader for the file being included
 
         Raises:
-            TypeError: If either `including` or `included` are non static
+            TypeError: If either ``including`` or ``included`` are non static
         """
         if not getattr(including, 'static', False):
             raise TypeError(including)
@@ -223,11 +230,11 @@ class IncludeLoader(Loader):
 class Config(MutableMapping):
     """Primary interface for configuration access.
 
-    Composed of an ordered set of loaders. Implements `MutableMapping`.
+    Composed of an ordered set of loaders. Implements ``MutableMapping``.
     Contained loaders shadow each others' keys.
     Setting a key using MutableMapping methods shadows all loaders.
 
-    Performance warning: `len` on a `Config` instance iterates over it (albeit non exhausting)
+    Performance warning: ``len`` on a `Config` instance iterates over it (albeit non exhausting)
     """
     def __init__(self, loaders, **kwargs):
         """Construct a Config from multiple loaders
@@ -288,20 +295,20 @@ _config = None
 
 
 def make_config(env_prefix=None, file_path=None, find_file=False, include_key=None, **kwargs):
-    """Initialize a global default `Config`.
+    """Initialize a global default `Config` instance.
 
     Args:
         env_prefix (str): If provided, used to construct an `EnvLoader` instance for the default config.
         file_path (str): If provided, used to construct a `FileLoader` instance for the default config.
             `make_config` will try to auto detect the appropriate `FileLoader` subclass via the file extension.
-        find_file (bool): If `True`, crawl upwards from current working directory until `file_path` is found.
-        include_key (str): Can only be given alongside a `file_path`.
+        find_file (bool): If ``True``, crawl upwards from current working directory until ``file_path`` is found.
+        include_key (str): Can only be given alongside a ``file_path``.
             If given, the value corresponding to it will be treated as another file to load, recursively.
-        **kwargs: Passed to `Config.__init__`, overrides values from all loaders.
+        **kwargs: Passed to ``Config.__init__``, overrides values from all loaders.
 
     Raises:
-        ValueError: `include_key` given without `file_path`.
-        FileNotFoundError: `file_path` or any files inferred from `include_key` cannot be found.
+        ValueError: ``include_key`` given without ``file_path``.
+        FileNotFoundError: ``file_path`` or any files inferred from ``include_key`` cannot be found.
         IncludeCycleError: Cyclical includes detected
 
     Returns:
@@ -324,25 +331,25 @@ def make_config(env_prefix=None, file_path=None, find_file=False, include_key=No
 
 
 def get():
-    """Get the default global config.
+    """Get the current global default config.
 
     Returns:
-        The current global default config.
-        Future `make_config` calls will override the current global config.
+        The current global default `Config` instance.
+        Future `make_config` calls will create a new global config.
         Can be used to "store" configs created by `make_config`.
     """
     return _config
 
 
 def getkey(key, default=None):
-    """Get a value from the global default config.
+    """Get a value from the current global default config.
 
     Args:
         key (str): Passed to `Config.get`.
-        default (Optional): If `key` is not found, return this instead.
+        default (Optional): If ``key`` is not found, return this instead.
 
     Returns:
-        The value corresponding to `key` in the current global default config.
+        The value corresponding to ``key`` in the current global default config.
 
     Raises:
         AttributeError: If no global default config is initialized (via `make_config`)
@@ -354,7 +361,7 @@ def getkey(key, default=None):
 
 
 def setkey(key, value):
-    """Set a value in the global default config.
+    """Set a value in the current global default config.
 
     Args:
         key (str): key to set the value for
@@ -379,19 +386,19 @@ class IncludeCycleError(ValueError):
 # Utility
 
 def deep_merge(prim, sec):
-    """Recursively merge two mappings, with `prim` taking priority.
+    """Recursively merge two mappings, with ``prim`` taking priority.
 
     Where both mappings contain the same key and both values are themselves
     mappings, the values are merged recursively. Otherwise the value from
-    `prim` wins. If either argument is not a mapping, `prim` is returned as-is.
+    ``prim`` wins. If either argument is not a mapping, ``prim`` is returned as-is.
 
     Args:
         prim (Any): The higher-priority value.
         sec (Any): The lower-priority value.
 
     Returns:
-        The merged result. A read-only `MappingProxyType` when a merge
-        occurred, otherwise `prim` unchanged.
+        The merged result. A read-only ``MappingProxyType`` when a merge
+        occurred, otherwise ``prim`` unchanged.
     """
     if not isinstance(prim, Mapping) or not isinstance(sec, Mapping):
         return prim
@@ -404,8 +411,8 @@ def deep_merge(prim, sec):
 def deep_freeze(val):
     """Recursively convert a value into an immutable structure.
 
-    Mappings become read-only `MappingProxyType`s and sequences (other than
-    `str`, `bytes`, and `bytearray`) become tuples, applied recursively.
+    Mappings become read-only ``MappingProxyType``\\ s and sequences (other than
+    ``str``, ``bytes``, and ``bytearray``) become tuples, applied recursively.
     Any other value is returned unchanged.
 
     Args:
@@ -434,7 +441,7 @@ def resolve_includes(entry_file, include_key='include-cfg'):
 
     Raises:
         IncludeCycleError: If the include directives form a cycle.
-        FileNotFoundError: If `entry_file` or any included file cannot be found.
+        FileNotFoundError: If ``entry_file`` or any included file cannot be found.
     """
     included = list()
     loaders = list()
